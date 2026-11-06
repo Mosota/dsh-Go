@@ -223,6 +223,7 @@ class AdbStatus {
 class PhoneBackgroundStatus {
   const PhoneBackgroundStatus({
     this.mode = PhoneBackgroundMode.off,
+    this.vdisplayEnabled = false,
     this.ready = false,
     this.reason,
     this.androidOk = false,
@@ -234,6 +235,7 @@ class PhoneBackgroundStatus {
 
   factory PhoneBackgroundStatus.fromMap(Map<Object?, Object?> m) => PhoneBackgroundStatus(
     mode: PhoneBackgroundMode.parse(m['mode']),
+    vdisplayEnabled: m['vdisplayEnabled'] == null ? false : _flag(m['vdisplayEnabled']),
     ready: _flag(m['ready']),
     reason: _text(m['reason']),
     androidOk: _flag(m['androidOk']),
@@ -244,6 +246,10 @@ class PhoneBackgroundStatus {
   );
 
   final PhoneBackgroundMode mode;
+
+  /// 虚拟屏's own switch: the agent may run on the virtual display. The
+  /// channel above is the transport both this and the model's `shell` use.
+  final bool vdisplayEnabled;
 
   /// The chosen mode can drive a virtual display right now.
   final bool ready;
@@ -380,6 +386,7 @@ class PhoneStatus {
     this.ready = true,
     this.error,
     this.enabled = false,
+    this.shellAllowed = false,
     this.bridgeListening = false,
     this.a11y = const PhoneA11yStatus(),
     this.a11yKeeper = const A11yKeeperStatus(),
@@ -395,6 +402,7 @@ class PhoneStatus {
   const PhoneStatus.notReady([this.error])
     : ready = false,
       enabled = false,
+      shellAllowed = false,
       bridgeListening = false,
       a11y = const PhoneA11yStatus(),
       a11yKeeper = const A11yKeeperStatus(),
@@ -407,6 +415,7 @@ class PhoneStatus {
 
   factory PhoneStatus.fromMap(Map<Object?, Object?> m) => PhoneStatus(
     enabled: _flag(m['enabled']),
+    shellAllowed: _flag(m['shellAllowed']),
     bridgeListening: _flag(m['bridgeListening']),
     a11y: PhoneA11yStatus.fromMap(_map(m['a11y'])),
     a11yKeeper: A11yKeeperStatus.fromMap(_map(m['a11yKeeper'])),
@@ -426,6 +435,9 @@ class PhoneStatus {
 
   /// The master switch 「手机操控」.
   final bool enabled;
+
+  /// #153: the model may use the `shell`/`device` tools (independent of 虚拟屏).
+  final bool shellAllowed;
   final bool bridgeListening;
   final PhoneA11yStatus a11y;
   final A11yKeeperStatus a11yKeeper;
@@ -441,10 +453,11 @@ class PhoneStatus {
   final PhoneTaskStatus task;
   final PhoneDevice device;
 
-  PhoneStatus copyWith({bool? enabled}) => PhoneStatus(
+  PhoneStatus copyWith({bool? enabled, bool? shellAllowed}) => PhoneStatus(
     ready: ready,
     error: error,
     enabled: enabled ?? this.enabled,
+    shellAllowed: shellAllowed ?? this.shellAllowed,
     bridgeListening: bridgeListening,
     a11y: a11y,
     a11yKeeper: a11yKeeper,
@@ -956,6 +969,14 @@ class PhoneChannel {
   }
 
   Future<PhoneResult> setBackgroundMode(PhoneBackgroundMode mode) => _result('setBackgroundMode', {'mode': mode.name});
+
+  /// #153: the model's `shell`/`device` switch, independent of 虚拟屏.
+  Future<bool> setShellAllowed(bool allowed) => _bool('setShellAllowed', {'allowed': allowed});
+
+  Future<bool> shellAllowed() => _bool('shellAllowed');
+
+  /// 虚拟屏's own switch: off keeps the privileged channel for the model's `shell`.
+  Future<bool> setVdisplayEnabled(bool enabled) => _bool('setVdisplayEnabled', {'enabled': enabled});
 
   /// The caller gates these actions on the advertised versioned capabilities.
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) => _result('setBackgroundMode', {'mode': mode.name});

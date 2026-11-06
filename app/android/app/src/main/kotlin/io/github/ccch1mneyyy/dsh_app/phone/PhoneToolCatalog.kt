@@ -22,6 +22,8 @@ object PhoneToolCatalog {
     const val KEY = "key"
     const val TAP_XY = "tap_xy"
     const val HANDOFF = "handoff"
+    const val SHELL = "shell"
+    const val DEVICE = "device"
 
     class Tool(val name: String, val description: String, val properties: Map<String, Any?>, val required: List<String>) {
         fun toJson(): Map<String, Any?> = linkedMapOf(
@@ -244,6 +246,32 @@ object PhoneToolCatalog {
             // l10n:keep agent tool catalog
             linkedMapOf("reason" to str("要用户做什么，一句话")),
             listOf("reason"),
+        ),
+        Tool(
+            SHELL,
+            // l10n:keep agent tool catalog
+            "在手机上以 shell 身份执行一条命令（需用户开通「不打扰模式」的特权通道），返回退出码和输出。" +
+                // l10n:keep agent tool catalog
+                "适合 dumpsys / pm / settings / getprop / logcat 这类只有 shell 能读的信息。" +
+                // l10n:keep agent tool catalog
+                "卸载应用、改安全设置、清数据这类命令会被拒绝，请改用 handoff 让用户自己操作。",
+            linkedMapOf(
+                // l10n:keep agent tool catalog
+                "cmd" to str("要执行的命令，如 dumpsys battery | head -20"),
+                // l10n:keep agent tool catalog
+                "timeout_ms" to int("超时毫秒，默认 30000，上限 300000"),
+                // l10n:keep agent tool catalog
+                "cwd" to str("工作目录，可省略"),
+            ),
+            listOf("cmd"),
+        ),
+        Tool(
+            DEVICE,
+            // l10n:keep agent tool catalog
+            "一次取回这台手机的基本情况（系统版本、机型、屏幕、存储、电池、网络、已安装包数量）。",
+            // l10n:keep agent tool catalog
+            linkedMapOf<String, Any?>(),
+            emptyList(),
         ),
     )
 

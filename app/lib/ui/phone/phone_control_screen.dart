@@ -34,6 +34,7 @@ import 'phone_disclosure_sheet.dart';
 import 'phone_background_guide.dart';
 import 'phone_unlock_page.dart';
 import 'phone_widgets.dart';
+import 'privileged_channel_page.dart';
 import 'restricted_settings_guide.dart';
 import 'screen_text_sheet.dart';
 
@@ -334,10 +335,28 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
               title: l10n.phoneControlAdvanced,
               children: [
                 ListPageRow(
+                  icon: AppIcons.systemAccess,
+                  title: '特权通道',
+                  subtitle: privilegedSummary(status.background),
+                  onTap: () => _push(const PhonePrivilegedPage()),
+                ),
+                ListPageRow(
                   icon: AppIcons.dndMode,
                   spot: SettingsIndex.entry(SettingsPageId.phoneDnd),
-                  subtitle: dndSummary(status.background),
+                  title: '虚拟屏',
+                  subtitle: status.background.vdisplayEnabled ? '开启：Agent 在虚拟屏上操作' : '已关闭',
                   onTap: () => _push(const PhoneDndPage()),
+                  trailing: Switch(
+                    value: status.background.vdisplayEnabled,
+                    onChanged: (v) => unawaited(_phone.setVdisplayEnabled(v)),
+                  ),
+                ),
+                ListPageRow(
+                  icon: Icons.terminal,
+                  title: '允许模型使用 shell 工具',
+                  subtitle: '让模型能执行 dumpsys、pm、settings 这类命令',
+                  onTap: () => unawaited(_phone.setShellAllowed(!status.shellAllowed)),
+                  trailing: Switch(value: status.shellAllowed, onChanged: (v) => unawaited(_phone.setShellAllowed(v))),
                 ),
                 ListPageRow(
                   icon: AppIcons.keepAlive,

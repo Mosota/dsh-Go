@@ -27,6 +27,7 @@ import io.github.ccch1mneyyy.dsh_app.phone.a11y.PhoneA11yService
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl
 import io.github.ccch1mneyyy.dsh_app.phone.background.SecureSettingsGrant
 import io.github.ccch1mneyyy.dsh_app.runtime.DshService
+import io.github.ccch1mneyyy.dsh_app.runtime.PowerSave
 import io.github.ccch1mneyyy.dsh_app.shortcuts.EntryActivity
 import java.io.File
 import java.time.ZoneId
@@ -154,6 +155,15 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     // ── Switch and app lists ────────────────────────────────────────────────────────
 
     fun isEnabled(): Boolean = switchedOn(app)
+
+    /** #153: whether the model may use the `shell`/`device` tools (independent of 不打扰模式). */
+    fun shellAllowed(): Boolean = prefs.getBoolean(K_SHELL, false)
+
+    fun setShellAllowed(allowed: Boolean): Boolean {
+        prefs.edit().putBoolean(K_SHELL, allowed).apply()
+        emitStatus()
+        return true
+    }
 
     /** Off closes the bridge and stops the task after any in-flight keeper settings write.
      * On needs an engine restart (the UI does it); the rebind gap never holds this switch.
@@ -442,6 +452,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     fun status(): Map<String, Any?> = linkedMapOf(
         "enabled" to isEnabled(),
+        "shellAllowed" to shellAllowed(),
         "bridgeListening" to bridge.listening,
         "a11y" to linkedMapOf("enabled" to a11yEnabledInSettings(), "serviceConnected" to (PhoneRegistry.mainDriver != null)),
         "overlay" to (PhoneRegistry.overlayGate != null),
@@ -529,6 +540,8 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     /** Recomputes the status off the main thread and pushes it if it changed. */
     fun emitStatus() {
+        // 省电模式: a phone task (or a pending confirmation) is exactly "busy".
+        runCatching { PowerSave.setBusy(tasks.snapshot().active) }
         if (sinks.isEmpty()) return
         ticker.execute { pushIfChanged(force = false) }
     }
@@ -614,6 +627,33 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     override fun system(): SystemApi = system
 
+    /**
+     * #153: the `shell`/`device` tools ride the 不打扰模式 channel (the only place a shell uid
+     * exists), but are gated by their own switch so opening phone control does not silently hand
+     * the model a shell. Returning null keeps the tool's answer honest.
+     */
+    override fun privilegedExec(cmd: String, timeoutMs: Int?, cwd: String?): Map<String, Any?>? {
+        if (!shellAllowed()) return null
+        if (privilegedChannelOff()) return null
+        return background.exec(cmd, timeoutMs, cwd)
+    }
+
+    override fun privilegedDump(): Map<String, Any?>? {
+        if (!shellAllowed()) return null
+        if (privilegedChannelOff()) return null
+        return background.deviceDump()
+    }
+
+    /**
+     * The transport is off. Reads the real mode: the legacy `mode` field reports a root channel as
+     * `off`, and `shell` runs fine over root.
+     */
+    private fun privilegedChannelOff(): Boolean {
+        val status = background.status()
+        val mode = (status["privileged"] as? Map<*, *>)?.get("mode") as? String ?: status["mode"]
+        return mode == "off"
+    }
+
     override fun zone(): ZoneId = ZoneId.systemDefault()
 
     override fun notifyFix(kind: String) {
@@ -641,6 +681,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         internal val keeperSwitchLock = Any()
         private const val K_POLICIES = "policies"
         private const val K_TCP_FALLBACK = "tcpFallback"
+        private const val K_SHELL = "modelShell"
         private const val CHANNEL_FIX = "dsh-phone-fix"
         private const val NOTIFY_FIX_ID = 4099
 

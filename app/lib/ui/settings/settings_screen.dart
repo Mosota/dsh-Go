@@ -50,6 +50,7 @@ import '../theme/theme.dart';
 import '../update/update_tiles.dart' show UpdateBadge;
 import 'about_page.dart';
 import 'appearance/appearance_page.dart';
+import 'backup_page.dart';
 import 'background_guide_page.dart';
 import 'diagnostics_page.dart';
 import 'interface_page.dart';
@@ -57,6 +58,7 @@ import 'language_tile.dart';
 import 'notification_settings.dart';
 import 'performance_page.dart';
 import 'personalization_page.dart';
+import 'power_save_page.dart';
 import 'privacy_page.dart';
 import 'search/settings_search_page.dart';
 import 'settings_widgets.dart';
@@ -239,6 +241,13 @@ class SettingsScreen extends ConsumerWidget {
             const VoiceSettingsTile(tint: SettingsHues.general),
             const PerformanceSettingsTile(tint: SettingsHues.general),
             SettingsTile(
+              icon: Icons.battery_saver,
+              tint: SettingsHues.general,
+              title: '省电模式',
+              subtitle: '空闲时允许系统休眠，有事自动保活',
+              onTap: () => _push(context, const PowerSavePage()),
+            ),
+            SettingsTile(
               icon: AppIcons.keepAlive,
               tint: SettingsHues.general,
               spot: SettingsIndex.entry(SettingsPageId.background),
@@ -259,6 +268,13 @@ class SettingsScreen extends ConsumerWidget {
               tint: SettingsHues.general,
               spot: SettingsIndex.entry(SettingsPageId.privacy),
               onTap: () => _push(context, const PrivacyPage()),
+            ),
+            SettingsTile(
+              icon: AppIcons.files,
+              tint: SettingsHues.general,
+              title: '备份与恢复',
+              subtitle: '备份会话、设置与插件（不含 API key），或从备份导入',
+              onTap: () => _push(context, const BackupPage()),
             ),
           ],
         ),

@@ -183,7 +183,7 @@ class _AppPageState extends State<AppPage> {
             children: [
               CustomScrollView(
                 controller: _controller,
-                physics: AppMotion.scrollPhysics(context),
+                physics: AppMotion.scrollPhysics(context) ?? const AlwaysScrollableScrollPhysics(),
                 slivers: [
                   SliverToBoxAdapter(child: SizedBox(height: top)),
                   if (header != null)

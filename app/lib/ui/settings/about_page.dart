@@ -53,6 +53,11 @@ class AboutPage extends ConsumerWidget {
               ),
             ),
             SettingsTile(
+              icon: AppIcons.allFeatures,
+              title: '由 DeepSeek 修改',
+              subtitle: '本版由 DeepSeek 在官方版本基础上修改',
+            ),
+            SettingsTile(
               spot: Spots.licenses,
               onTap: () => showLicensePage(
                 context: context,

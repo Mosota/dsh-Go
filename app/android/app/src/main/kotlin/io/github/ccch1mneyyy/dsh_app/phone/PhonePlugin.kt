@@ -141,6 +141,9 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
             "openAccessibilitySettings" -> result.success(startActivity(control.accessibilitySettingsIntent()))
             "openAppDetails" -> result.success(startActivity(control.appDetailsIntent()))
             "testScreen" -> async(result) { control.testScreen() }
+            "setShellAllowed" -> async(result) { control.setShellAllowed(call.argument<Boolean>("allowed") == true) }
+            "shellAllowed" -> result.success(control.shellAllowed())
+            "setVdisplayEnabled" -> async(result) { control.background.setVdisplayEnabled(call.argument<Boolean>("enabled") == true) }
             "setBackgroundMode" -> {
                 val mode = call.argument<String>("mode") ?: "off"
                 val live = stillWanted(privilegedActions.select())

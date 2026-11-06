@@ -23,6 +23,9 @@ import io.github.ccch1mneyyy.dsh_app.phone.PhoneControl
 class DshService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+
+    /** 省电模式 calls back on this to release or take keep-alive (service is in-process). */
+    val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var installSink: RuntimeController.EventSink? = null
     private var installPercent = -1
@@ -89,7 +92,8 @@ class DshService : Service() {
                 val notification = buildNotification(this, controller)
                 foreground(notification)
                 running = true
-                acquireWakeLock()
+                // 省电模式 and idle: the notification goes away again at once (see applyKeepAlive).
+                applyKeepAlive()
                 registerNetworkCallback(controller)
                 logBackgroundPolicy(controller)
                 controller.startProcess()
@@ -98,8 +102,14 @@ class DshService : Service() {
         return START_NOT_STICKY
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        PowerSave.register(this)
+    }
+
     override fun onDestroy() {
         running = false
+        PowerSave.register(null)
         installSink?.let { RuntimeController.get(this).removeSink(it) }
         installSink = null
         networkCallback?.let { callback ->
@@ -149,6 +159,26 @@ class DshService : Service() {
             )
         }.getOrNull() ?: return
         controller.note(line)
+    }
+
+    /**
+     * 省电模式: hold keep-alive only while something needs the phone.
+     * Detaching (not removing) the notification keeps it in the shade while the
+     * system is allowed to sleep.
+     */
+    fun applyKeepAlive() {
+        if (!running) return
+        if (PowerSave.keepAlive(this)) {
+            runCatching { foreground(buildNotification(this, RuntimeController.get(this))) }
+            acquireWakeLock()
+            return
+        }
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_DETACH)
+            else @Suppress("DEPRECATION") stopForeground(false)
+        }
     }
 
     private fun acquireWakeLock() {

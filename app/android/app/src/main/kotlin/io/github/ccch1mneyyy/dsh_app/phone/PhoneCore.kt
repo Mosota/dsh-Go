@@ -25,6 +25,10 @@ interface PhoneEnv {
      * without destroying its content so the app comes to the main screen. A sentence for the model, or null.
      */
     fun beforeHandoff(screen: PhoneScreen): String? = null
+    /** #153: run a command through the privileged channel; null while it is not usable. */
+    fun privilegedExec(cmd: String, timeoutMs: Int?, cwd: String?): Map<String, Any?>? = null
+    /** #153: one-shot device facts; null while the privileged channel is not usable. */
+    fun privilegedDump(): Map<String, Any?>? = null
     fun sleep(ms: Long) = Thread.sleep(ms)
 }
 
@@ -159,9 +163,86 @@ class PhoneCore(
             PhoneToolCatalog.TAP, PhoneToolCatalog.TYPE, PhoneToolCatalog.SCROLL, PhoneToolCatalog.TAP_XY -> act(name, a, scope)
             PhoneToolCatalog.KEY -> key(a)
             PhoneToolCatalog.HANDOFF -> handoff(a, scope)
+            PhoneToolCatalog.SHELL -> shell(a)
+            PhoneToolCatalog.DEVICE -> device()
             // l10n:keep agent tool result
             else -> Out("没有这个手机工具：$name", error = true)
         }
+    }
+
+    // ── Privileged commands (#153) ──────────────────────────────────────────────────
+
+    /**
+     * Commands that destroy data, change security posture or take the device away from its owner
+     * are refused here and handed back to the person instead. The list is a second line of defence:
+     * the privileged channel itself already only accepts what this app asks it to run.
+     */
+    private val SHELL_DENY = listOf(
+        Regex("""\bpm\s+(uninstall|clear|disable-user)"""),
+        Regex("""\bpm\s+revoke"""),
+        Regex("""\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(/|/data|/system|/sdcard)\b"""),
+        Regex("""\bmkfs\."""),
+        Regex("""\bdd\s+if=.*\bof=/dev/"""),
+        Regex("""\bsettings\s+put\s+(secure|global)\s+"""),
+        Regex("""\bam\s+(force-stop\s+com\.android|broadcast.*BOOT_COMPLETED)"""),
+        Regex("""\bwipe\b"""),
+        Regex("""\breboot\b"""),
+        Regex("""\bsu\b"""),
+    )
+
+    private fun shell(a: Args): Out {
+        val cmd = a.text("cmd")?.trim().orEmpty()
+        // l10n:keep agent tool result
+        if (cmd.isEmpty()) return Out("需要 cmd：要执行的命令。", error = true, summary = "shell", decision = "invalid")
+        val hit = SHELL_DENY.firstOrNull { it.containsMatchIn(cmd) }
+        if (hit != null) {
+            // l10n:keep agent tool result
+            return Out(
+                "这条命令会改动系统或删数据，被拒绝了：$cmd\n改用 handoff 让用户自己操作。",
+                error = true, summary = "shell", decision = "refused",
+            )
+        }
+        val result = env.privilegedExec(cmd, a.int("timeout_ms"), a.str("cwd"))
+            ?: return Out(env.backgroundUnavailable(), error = true, summary = "shell", decision = "unavailable")
+        if (result["ok"] != true) {
+            val reason = result["reason"] as? String
+            // l10n:keep agent tool result
+            return Out("特权通道执行失败：${reason ?: "未知原因"}", error = true, summary = "shell", decision = "error")
+        }
+        val rc = (result["rc"] as? Int) ?: -1
+        val out = (result["stdout"] as? String).orEmpty()
+        val err = (result["stderr"] as? String).orEmpty()
+        val truncated = result["truncated"] == true
+        val text = buildString {
+            // l10n:keep agent tool result
+            append("退出码 ").append(rc).append('\n')
+            if (out.isNotEmpty()) append(out.trimEnd())
+            if (err.isNotEmpty()) {
+                if (out.isNotEmpty()) append("\n")
+                // l10n:keep agent tool result
+                append("[stderr] ").append(err.trimEnd())
+            }
+            // l10n:keep agent tool result
+            if (out.isEmpty() && err.isEmpty()) append("（无输出）")
+            // l10n:keep agent tool result
+            if (truncated) append("\n…输出过长已截断")
+        }
+        return Out(text, error = rc != 0, summary = "shell", decision = if (rc == 0) "ok" else "nonzero")
+    }
+
+    private fun device(): Out {
+        val result = env.privilegedDump()
+            ?: return Out(env.backgroundUnavailable(), error = true, summary = "device", decision = "unavailable")
+        if (result["ok"] != true) {
+            val reason = result["reason"] as? String
+            // l10n:keep agent tool result
+            return Out("读取设备信息失败：${reason ?: "未知原因"}", error = true, summary = "device", decision = "error")
+        }
+        val text = (result["text"] as? String).orEmpty().ifEmpty {
+            // l10n:keep agent tool result
+            "没有读到设备信息。"
+        }
+        return Out(text, summary = "device", decision = "ok")
     }
 
     // ── System actions ──────────────────────────────────────────────────────────────

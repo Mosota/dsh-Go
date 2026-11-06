@@ -41,9 +41,11 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import io.github.ccch1mneyyy.dsh_app.phone.SensitiveWords
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
 import java.nio.ByteBuffer
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -102,6 +104,17 @@ class PrivilegedDisplayCore(private val context: Context) {
                 response.putBoolean(Proto.OK, true)
                 return response
             }
+            // #153: the two ops that do not touch the virtual display at all.
+            if (op == Proto.OP_EXEC) {
+                execCommand(request, response)
+                if (!response.containsKey(Proto.ERROR)) response.putBoolean(Proto.OK, true)
+                return response
+            }
+            if (op == Proto.OP_DUMP) {
+                deviceDump(response)
+                if (!response.containsKey(Proto.ERROR)) response.putBoolean(Proto.OK, true)
+                return response
+            }
             synchronized(lock) { dispatch(op, request, response) }
             if (!response.containsKey(Proto.ERROR)) response.putBoolean(Proto.OK, true)
         } catch (e: Throwable) {
@@ -124,6 +137,105 @@ class PrivilegedDisplayCore(private val context: Context) {
         if (e is InputProbe.Failure) e.observation?.encode()
         else if (e is Fault || e is InterruptedException || e is SecurityException) null
         else e.javaClass.simpleName
+
+    // ---- #153: generic command execution over the same channel -----------------
+
+    /**
+     * [Proto.OP_EXEC]: run [Proto.CMD] as this process's uid (shell) and return its output.
+     *
+     * The channel is already authenticated, already user-consented and already serialised by
+     * [PrivilegedChannel]; this only adds the execution primitive. Output is capped so a
+     * runaway command cannot fill the Bundle, and the child is killed on timeout.
+     */
+    private fun execCommand(request: Bundle, response: Bundle) {
+        val cmd = request.getString(Proto.CMD).orEmpty()
+        if (cmd.isBlank()) throw Fault("invalidArguments")
+        val timeoutMs = request.getInt(Proto.TIMEOUT_MS, DEFAULT_EXEC_TIMEOUT_MS).coerceIn(1_000, MAX_EXEC_TIMEOUT_MS)
+        val cwd = request.getString(Proto.CWD)?.takeIf { it.startsWith("/") }
+        val process = try {
+            ProcessBuilder(listOf("/system/bin/sh", "-c", cmd))
+                .apply { if (cwd != null && File(cwd).isDirectory) directory(File(cwd)) }
+                .redirectErrorStream(false)
+                .start()
+        } catch (e: Throwable) {
+            throw Fault("execUnavailable")
+        }
+        try {
+            process.outputStream.close()
+            val out = StringBuilder()
+            val err = StringBuilder()
+            val outReader = Thread { drain(process.inputStream, out) }
+            val errReader = Thread { drain(process.errorStream, err) }
+            outReader.isDaemon = true; errReader.isDaemon = true
+            outReader.start(); errReader.start()
+            val finished = process.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                response.putString(Proto.ERROR, "execTimeout")
+                response.putString(Proto.STDOUT, out.toString())
+                response.putString(Proto.STDERR, err.toString())
+                return
+            }
+            outReader.join(2_000); errReader.join(2_000)
+            response.putInt(Proto.RC, process.exitValue())
+            response.putString(Proto.STDOUT, out.toString())
+            response.putString(Proto.STDERR, err.toString())
+            if (out.length >= MAX_OUTPUT_CHARS || err.length >= MAX_OUTPUT_CHARS) {
+                response.putBoolean(Proto.TRUNCATED, true)
+            }
+        } finally {
+            runCatching { process.destroy() }
+        }
+    }
+
+    private fun drain(stream: java.io.InputStream, into: StringBuilder) {
+        try {
+            stream.bufferedReader().use { reader ->
+                val buffer = CharArray(8192)
+                while (true) {
+                    val n = reader.read(buffer)
+                    if (n <= 0) break
+                    synchronized(into) {
+                        val room = MAX_OUTPUT_CHARS - into.length
+                        if (room <= 0) return
+                        into.append(buffer, 0, minOf(n, room))
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            // A closed stream after destroyForcibly() is expected.
+        }
+    }
+
+    /** [Proto.OP_DUMP]: one round trip for the device facts a model keeps asking for. */
+    private fun deviceDump(response: Bundle) {
+        val facts = linkedMapOf<String, String>()
+        fun put(key: String, value: String?) { value?.takeIf { it.isNotBlank() }?.let { facts[key] = it } }
+        put("sdk", Build.VERSION.SDK_INT.toString())
+        put("release", Build.VERSION.RELEASE)
+        put("fingerprint", Build.FINGERPRINT)
+        put("manufacturer", Build.MANUFACTURER)
+        put("model", Build.MODEL)
+        put("uid", Process.myUid().toString())
+        put("shell", (Process.myUid() == Process.SHELL_UID).toString())
+        for ((key, cmd) in DUMP_COMMANDS) {
+            put(key, runCatching { shellLine(cmd, 6_000) }.getOrNull())
+        }
+        val storage = runCatching { privileged.getSystemService(android.os.storage.StorageManager::class.java) }.getOrNull()
+        runCatching {
+            storage?.primaryStorageVolume?.directory?.let { put("dataDir", it.absolutePath) }
+        }
+        response.putString(Proto.STDOUT, facts.entries.joinToString("\n") { "${it.key}: ${it.value}" })
+        response.putInt(Proto.RC, 0)
+    }
+
+    private fun shellLine(cmd: String, timeoutMs: Int): String {
+        val process = ProcessBuilder(listOf("/system/bin/sh", "-c", cmd)).redirectErrorStream(true).start()
+        process.outputStream.close()
+        val text = process.inputStream.bufferedReader().readText()
+        if (!process.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)) process.destroyForcibly()
+        return text.trim()
+    }
 
     private fun dispatch(op: String?, request: Bundle, response: Bundle) {
         val ownerId = request.getString(Proto.OWNER).orEmpty()
@@ -883,6 +995,21 @@ class PrivilegedDisplayCore(private val context: Context) {
     }
 
     companion object {
+        private const val DEFAULT_EXEC_TIMEOUT_MS = 30_000
+        private const val MAX_EXEC_TIMEOUT_MS = 300_000
+
+        /** [Proto.STDOUT] / [Proto.STDERR] are each capped at this many chars (~64 KB per stream). */
+        private const val MAX_OUTPUT_CHARS = 64 * 1024
+
+        /** What [Proto.OP_DUMP] reports; each value is the first line(s) of a shell command. */
+        private val DUMP_COMMANDS = listOf(
+            "battery" to "dumpsys battery | grep -E 'level|status|temperature' | head -3",
+            "display" to "wm size; wm density",
+            "storage" to "df -h /data /storage/emulated/0 | tail -2",
+            "network" to "dumpsys connectivity | grep -E 'Active default network' | head -1",
+            "packages" to "pm list packages | wc -l",
+        )
+
         private val PACKAGE = Regex("[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+")
         private val FLAG_NAMES = listOf(
             "PUBLIC", "OWN_CONTENT_ONLY", "SUPPORTS_TOUCH", "DESTROY_CONTENT_ON_REMOVAL",

@@ -55,6 +55,21 @@ object Proto {
     const val USER = "user"
     const val APP_PACKAGE = "io.github.ccch1mneyyy.dsh_app"
 
+    // ---- #153: the same privileged channel, opened to the model -----------------
+    /** Run one command as the channel's uid (shell): [CMD], [TIMEOUT_MS], [CWD]. */
+    const val OP_EXEC = "exec"
+
+    /** One-shot device picture: build, display, storage, battery, network, package count. */
+    const val OP_DUMP = "dump"
+
+    const val CMD = "cmd"
+    const val TIMEOUT_MS = "timeoutMs"
+    const val CWD = "cwd"
+    const val RC = "rc"
+    const val STDOUT = "stdout"
+    const val STDERR = "stderr"
+    const val TRUNCATED = "truncated"
+
     const val INJECT_OK = "injectOk"
     /** Gate only, with INJECT_OK false: the failing injection's [ERROR] code. Older cores omit it. */
     const val INJECT_ERROR = "injectError"

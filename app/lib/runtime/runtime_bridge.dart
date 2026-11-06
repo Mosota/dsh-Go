@@ -692,6 +692,30 @@ class RuntimeBridge {
   /// Deletes the runtime with everything in /root except [keep].
   Future<void> reset({ResetKeep keep = const ResetKeep()}) => _methods.invokeMethod<void>('reset', {'keep': keep.wire});
 
+  /// 省电模式's state: enabled, whether something needs the phone right now, and
+  /// whether keep-alive is therefore held.
+  Future<Map<Object?, Object?>?> powerSave() async {
+    try {
+      return await _methods.invokeMapMethod<Object?, Object?>('powerSave');
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<bool> setPowerSave(bool enabled) async {
+    try {
+      return await _methods.invokeMethod<bool>('setPowerSave', {'enabled': enabled}) ?? false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// 备份 /root/.dsh（会话、设置、技能、插件；不含 API key）→ 返回 zip 的绝对路径。
+  Future<String?> backup() async => await _methods.invokeMethod<String>('backup');
+
+  /// 从 zip 覆盖恢复到 /root/.dsh（zip 里没有的文件保留不动）。
+  Future<bool> restore(String path) async => await _methods.invokeMethod<bool>('restore', {'path': path}) ?? false;
+
   Future<List<String>> logs({int lines = 500}) async =>
       (await _methods.invokeListMethod<String>('getLogs', {'lines': lines})) ?? const [];
 

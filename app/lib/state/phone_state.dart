@@ -205,6 +205,12 @@ class PhoneController extends Notifier<PhoneState> {
 
   Future<PhoneResult> setBackgroundMode(PhoneBackgroundMode mode) => _thenRefresh(_channel.setBackgroundMode(mode));
 
+  /// 虚拟屏's own switch (the privileged channel stays for the model's `shell`).
+  Future<bool> setVdisplayEnabled(bool enabled) => _thenRefresh(_channel.setVdisplayEnabled(enabled));
+
+  /// #153: independent switch for the model's `shell`/`device` tools.
+  Future<bool> setShellAllowed(bool allowed) => _thenRefresh(_channel.setShellAllowed(allowed));
+
   /// Refused before any channel call when the native side doesn't offer [mode].
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) =>
       _ifSupported(mode, () => _channel.setPrivilegedMode(mode));

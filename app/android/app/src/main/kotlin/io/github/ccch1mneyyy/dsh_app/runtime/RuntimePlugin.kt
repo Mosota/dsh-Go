@@ -120,6 +120,25 @@ class RuntimePlugin :
             }
             "getLogs" -> result.success(controller.recentLogs(call.argument<Int>("lines") ?: 500))
             "getLogSnapshot" -> result.success(controller.logSnapshot((call.argument<Int>("lines") ?: 300).coerceIn(0, 2000)))
+            "powerSave" -> result.success(
+                mapOf(
+                    "enabled" to PowerSave.enabled(appContext),
+                    "busy" to PowerSave.busy,
+                    "keepAlive" to PowerSave.keepAlive(appContext),
+                ),
+            )
+            "setPowerSave" -> result.success(
+                PowerSave.setEnabled(appContext, call.argument<Boolean>("enabled") == true),
+            )
+            "backup" -> {
+                val path = BackupManager.backup(appContext)
+                if (path == null) result.error("backup_failed", null, null) else result.success(path)
+            }
+            "restore" -> {
+                val path = call.argument<String>("path")
+                if (path == null) result.error("invalid_arguments", null, null)
+                else result.success(BackupManager.restore(appContext, path))
+            }
             "reset" -> controller.reset(ResetKeep.fromWire(call.argument<List<String>>("keep").orEmpty())) { error ->
                 if (error == null) result.success(null) else result.error("reset_failed", error.message, null)
             }

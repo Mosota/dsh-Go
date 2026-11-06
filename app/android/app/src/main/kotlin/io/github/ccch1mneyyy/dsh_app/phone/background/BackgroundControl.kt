@@ -58,6 +58,13 @@ class BackgroundControl private constructor(context: Context) {
 
     private val mode: String get() = keep.mode
     @Volatile private var rootSelected = mode == "root"
+
+    /**
+     * 虚拟屏's own switch: whether the agent may run on the virtual display. The
+     * 特权通道 above is just the transport; this can be turned off while keeping
+     * the channel for the model's `shell` tool.
+     */
+    @Volatile private var vdisplayEnabled: Boolean = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(K_VDISPLAY, false)
     @Volatile private var channel: PrivilegedChannel? = null
     @Volatile private var driver: BackgroundDisplay? = null
     @Volatile private var driverTaskId: Long? = null
@@ -81,6 +88,7 @@ class BackgroundControl private constructor(context: Context) {
         val cached = gate.snapshot
         return mapOf(
             "mode" to PrivilegedPathPolicy.legacyMode(mode),
+            "vdisplayEnabled" to vdisplayEnabled,
             "ready" to PrivilegedPathPolicy.legacyReady(mode, reason == null),
             "reason" to PrivilegedPathPolicy.legacyReason(
                 mode, reason, AppStrings.get(app, R.string.background_root_legacy_client),
@@ -295,11 +303,56 @@ class BackgroundControl private constructor(context: Context) {
 
     fun requestShizukuPermission(then: () -> Unit): Boolean = shizuku.requestPermission(then)
 
+    /** #153: run one command through the privileged channel (used by the `shell` tool). */
+    fun exec(cmd: String, timeoutMs: Int?, cwd: String?): Map<String, Any?> {
+        val ch = activeChannel() ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_not_ready))
+        val request = Bundle().apply {
+            putString(Proto.OP, Proto.OP_EXEC)
+            putString(Proto.CMD, cmd)
+            if (timeoutMs != null) putInt(Proto.TIMEOUT_MS, timeoutMs)
+            if (cwd != null) putString(Proto.CWD, cwd)
+        }
+        val response = runCatching { ch.execute(request) }.getOrNull()
+            ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_no_response))
+        return mapOf(
+            "ok" to response.getBoolean(Proto.OK),
+            "rc" to response.getInt(Proto.RC),
+            "stdout" to response.getString(Proto.STDOUT).orEmpty(),
+            "stderr" to response.getString(Proto.STDERR).orEmpty(),
+            "truncated" to response.getBoolean(Proto.TRUNCATED),
+            "reason" to response.getString(Proto.ERROR),
+        )
+    }
+
+    /** #153: device facts in one round trip (used by the `device` tool). */
+    fun deviceDump(): Map<String, Any?> {
+        val ch = activeChannel() ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_not_ready))
+        val response = runCatching { ch.execute(Bundle().apply { putString(Proto.OP, Proto.OP_DUMP) }) }.getOrNull()
+            ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_no_response))
+        return mapOf(
+            "ok" to response.getBoolean(Proto.OK),
+            "text" to response.getString(Proto.STDOUT).orEmpty(),
+            "reason" to response.getString(Proto.ERROR),
+        )
+    }
+
     // ---- task lifecycle (called by the bridge/core) ------------------------
+
+    /** 虚拟屏's own switch, independent of the channel ([setBackgroundMode]). */
+    fun setVdisplayEnabled(enabled: Boolean): Boolean {
+        vdisplayEnabled = enabled
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(K_VDISPLAY, enabled).apply()
+        // Off takes effect at once: the display goes, the channel stays for shell.
+        if (!enabled) endTask()
+        notifyChanged()
+        return true
+    }
 
     /** Connects, probes the gate, and registers the driver for the running task. */
     fun beginTask(taskId: Long): Boolean {
-        if (mode == "off" || !androidOk()) return false
+        // 虚拟屏 has its own switch: the channel is the transport (see [exec]),
+        // this is whether the agent may run on a virtual display at all.
+        if (mode == "off" || !vdisplayEnabled || !androidOk()) return false
         synchronized(this) {
             if (taskId <= endedTaskId.get() || (driverTaskId ?: Long.MIN_VALUE) > taskId) return false
             if (driverTaskId == taskId && driver != null && PhoneRegistry.backgroundDriver === driver) return true
@@ -313,7 +366,7 @@ class BackgroundControl private constructor(context: Context) {
         }
         if (Thread.currentThread().isInterrupted || activeChannel() == null) return false
         synchronized(this) {
-            if (mode == "off" || taskId <= endedTaskId.get() || (driverTaskId ?: Long.MIN_VALUE) > taskId) return false
+            if (mode == "off" || !vdisplayEnabled || taskId <= endedTaskId.get() || (driverTaskId ?: Long.MIN_VALUE) > taskId) return false
             if (driverTaskId == taskId && driver != null && PhoneRegistry.backgroundDriver === driver) return true
             if (driver != null) endTask()
             val d = BackgroundDisplay(
@@ -628,6 +681,9 @@ class BackgroundControl private constructor(context: Context) {
     companion object {
         /** UserHandle.PER_USER_RANGE: a uid's user is uid / this. */
         private const val PER_USER_RANGE = 100_000
+
+        private const val PREFS = "dsh_phone_background"
+        private const val K_VDISPLAY = "vdisplayEnabled"
 
         @Volatile private var instance: BackgroundControl? = null
         fun get(context: Context): BackgroundControl =
