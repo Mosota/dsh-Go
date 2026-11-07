@@ -149,6 +149,23 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                 control.setShellGuardCategory(kind, call.argument<Boolean>("allowed") == true)
             }
             "setVdisplayEnabled" -> async(result) { control.background.setVdisplayEnabled(call.argument<Boolean>("enabled") == true) }
+            // 悬浮窗查看虚拟屏: the overlay's frames and touches, plus its own on/off.
+            "vscreenFrame" -> async(result) { control.vscreenFrame() }
+            "vscreenState" -> async(result) { control.vscreenState() }
+            "vscreenTap" -> async(result) {
+                val x = call.argument<Int>("x") ?: -1
+                val y = call.argument<Int>("y") ?: -1
+                if (x < 0 || y < 0) invalidVscreenPoint() else control.vscreenTap(x, y)
+            }
+            "vscreenSwipe" -> async(result) {
+                val x1 = call.argument<Int>("x1") ?: -1
+                val y1 = call.argument<Int>("y1") ?: -1
+                val x2 = call.argument<Int>("x2") ?: -1
+                val y2 = call.argument<Int>("y2") ?: -1
+                if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0) invalidVscreenPoint()
+                else control.vscreenSwipe(x1, y1, x2, y2, call.argument<Int>("durationMs") ?: 300)
+            }
+            "vscreenOverlay" -> result.success(control.vscreenOverlay(call.argument<Boolean>("open") == true))
             "setBackgroundMode" -> {
                 val mode = call.argument<String>("mode") ?: "off"
                 val live = stillWanted(privilegedActions.select())
@@ -208,6 +225,10 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
 
     private fun cancelledSelection(): Map<String, Any?> =
         mapOf("ok" to false, "reason" to AppStrings.get(appContext, R.string.background_selection_cancelled))
+
+    /** A tap/swipe without usable (non-negative) virtual-screen pixels. */
+    private fun invalidVscreenPoint(): Map<String, Any?> =
+        mapOf("ok" to false, "reasonCode" to "invalidArguments", "reason" to "参数无效")
 
     /** Whether the UI action that took [ticket] still counts when the worker reaches it. */
     private fun stillWanted(ticket: Long): () -> Boolean = { attached && privilegedActions.current(ticket) }

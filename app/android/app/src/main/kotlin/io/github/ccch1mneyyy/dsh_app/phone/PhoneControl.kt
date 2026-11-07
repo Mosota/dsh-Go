@@ -26,6 +26,7 @@ import io.github.ccch1mneyyy.dsh_app.phone.a11y.A11yKeeper
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.PhoneA11yService
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl
 import io.github.ccch1mneyyy.dsh_app.phone.background.SecureSettingsGrant
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenOverlayService
 import io.github.ccch1mneyyy.dsh_app.runtime.DshService
 import io.github.ccch1mneyyy.dsh_app.runtime.PowerSave
 import io.github.ccch1mneyyy.dsh_app.shortcuts.EntryActivity
@@ -462,6 +463,25 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     fun appDetailsIntent(): Intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.packageName}"))
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+    // ── 悬浮窗查看虚拟屏 ─────────────────────────────────────────────────────────────
+    // These are the overlay's own calls (and the app's): they read the display a task already
+    // runs, through the read-only preview owner, so they never take or release it.
+
+    /** One frame of the running 虚拟屏; `png` is the engine's captured image, base64'd. */
+    fun vscreenFrame(): Map<String, Any?> = background.frame()
+
+    /** Whether there is a display to preview, and its pixel size. */
+    fun vscreenState(): Map<String, Any?> = background.vscreenState()
+
+    /** A tap at the virtual screen's own pixels. */
+    fun vscreenTap(x: Int, y: Int): Map<String, Any?> = background.vscreenTap(x, y)
+
+    fun vscreenSwipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Map<String, Any?> =
+        background.vscreenSwipe(x1, y1, x2, y2, durationMs)
+
+    /** 悬浮窗查看虚拟屏: opens or closes the floating window (needs 显示在其他应用上层). */
+    fun vscreenOverlay(open: Boolean): Map<String, Any?> = VscreenOverlayService.ensure(app, open)
 
     /**
      * 「读一下当前屏幕」: the person's own on-device check, never sent to a model, so it shows

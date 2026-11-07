@@ -49,6 +49,19 @@ String privilegedSummary(PhoneBackgroundStatus bg) {
 
 const _groupMargin = EdgeInsets.fromLTRB(16, 12, 16, 12);
 
+/// Opens or closes 悬浮窗查看虚拟屏. Without 显示在其他应用上层 the window can't be added: the
+/// native side already opened the system switch, and this says what to turn on there.
+Future<void> _toggleVscreenOverlay(BuildContext context, WidgetRef ref, bool open) async {
+  final phone = ref.read(phoneProvider.notifier);
+  final result = open ? await phone.openVscreenOverlay() : await phone.closeVscreenOverlay();
+  if (!context.mounted) return;
+  if (!open || result.ok) return;
+  final text = result.reasonCode == 'noOverlayPermission'
+      ? '请允许显示在其他应用上层'
+      : (result.reason ?? '悬浮窗打不开');
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+}
+
 /// 虚拟屏: the agent works on a virtual display, on the 特权通道. The channel
 /// itself is chosen on [PhonePrivilegedPage]; this page only says what the mode
 /// does and whether the channel is there yet.
@@ -59,6 +72,7 @@ class PhoneDndPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final bg = ref.watch(phoneProvider.select((s) => s.status.background));
+    final overlay = ref.watch(vscreenOverlayProvider);
     // The real channel mode: the legacy `mode` reports a root channel as off.
     final ready = bg.effectiveMode != PhonePrivilegedMode.off && bg.effectiveReady;
 
@@ -78,6 +92,16 @@ class PhoneDndPage extends ConsumerWidget {
               trailing: Switch(
                 value: bg.vdisplayEnabled,
                 onChanged: (v) => unawaited(ref.read(phoneProvider.notifier).setVdisplayEnabled(v)),
+              ),
+            ),
+            ListPageRow(
+              icon: AppIcons.dndMode,
+              title: '悬浮窗查看虚拟屏',
+              subtitle: '在任意界面浮一个小窗，能看也能点',
+              onTap: () => unawaited(_toggleVscreenOverlay(context, ref, !overlay)),
+              trailing: Switch(
+                value: overlay,
+                onChanged: (v) => unawaited(_toggleVscreenOverlay(context, ref, v)),
               ),
             ),
           ],

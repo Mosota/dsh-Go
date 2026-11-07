@@ -4,6 +4,8 @@
 // (MissingPluginException → "未就绪") or failing (PlatformException → a reason).
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
@@ -421,16 +423,7 @@ class PhoneStatus {
     enabled: _flag(m['enabled']),
     shellAllowed: _flag(m['shellAllowed']),
     shellGuard: m['shellGuard'] == null ? true : _flag(m['shellGuard']),
-    guardCategories: {
-      final raw = m['shellGuardCategories'];
-      if (raw is Map) {
-        return {
-          for (final e in raw.entries)
-            if (e.key is String) e.key as String: e.value == true,
-        };
-      }
-      return const <String, bool>{};
-    }(),
+    guardCategories: _shellGuardCategories(m['shellGuardCategories']),
     bridgeListening: _flag(m['bridgeListening']),
     a11y: PhoneA11yStatus.fromMap(_map(m['a11y'])),
     a11yKeeper: A11yKeeperStatus.fromMap(_map(m['a11yKeeper'])),
@@ -611,16 +604,22 @@ class PhoneFinish {
       PhoneFinish(closed: closed, busy: busy, opened: opened, launched: launched, notified: notified, current: false);
 }
 
-/// `{ok, reason?}` replies.
+/// `{ok, reason?, reasonCode?}` replies. [reasonCode] is the stable code behind the
+/// sentence in [reason] (e.g. `noOverlayPermission`), null when the call didn't send one.
 class PhoneResult {
-  const PhoneResult(this.ok, [this.reason, this.pending = false]);
+  const PhoneResult(this.ok, [this.reason, this.pending = false, this.reasonCode]);
 
-  factory PhoneResult.fromMap(Map<Object?, Object?> m) =>
-      PhoneResult(_flag(m['ok']), _text(m['reason']), _flag(m['pending']));
+  factory PhoneResult.fromMap(Map<Object?, Object?> m) => PhoneResult(
+    _flag(m['ok']),
+    _text(m['reason']),
+    _flag(m['pending']),
+    _text(m['reasonCode']),
+  );
 
   final bool ok;
   final String? reason;
   final bool pending;
+  final String? reasonCode;
 }
 
 /// Reply of `testScreen`: the main screen read once.
@@ -1006,6 +1005,61 @@ class PhoneChannel {
   /// 虚拟屏's own switch: off keeps the privileged channel for the model's `shell`.
   Future<bool> setVdisplayEnabled(bool enabled) => _bool('setVdisplayEnabled', {'enabled': enabled});
 
+  // ── 悬浮窗查看虚拟屏 ─────────────────────────────────────────────────────────
+  // The floating window's own calls: a running 虚拟屏's frames, touches on it, and its
+  // on/off. Native reads the display a task already owns (a read-only owner), so none of
+  // these can take that display away from the task.
+
+  /// One frame of the running 虚拟屏: [bytes] are the engine's capture (JPEG; decode by
+  /// content, not by name) and [width]/[height] are the virtual screen's pixels. Null when
+  /// nothing is running or the native side doesn't answer.
+  Future<({Uint8List bytes, int width, int height})?> vscreenFrame() async {
+    try {
+      final map = await _methods.invokeMapMethod<Object?, Object?>('vscreenFrame');
+      if (map == null || !_flag(map['ok'])) return null;
+      final encoded = _text(map['png']);
+      if (encoded == null) return null;
+      return (
+        bytes: base64Decode(encoded),
+        width: _int(map['width']) ?? 0,
+        height: _int(map['height']) ?? 0,
+      );
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Whether there is a 虚拟屏 to preview, and its pixel size.
+  Future<({bool available, int width, int height})> vscreenState() async {
+    try {
+      final map = await _methods.invokeMapMethod<Object?, Object?>('vscreenState');
+      return (
+        available: _flag(map?['available']),
+        width: _int(map?['width']) ?? 0,
+        height: _int(map?['height']) ?? 0,
+      );
+    } on MissingPluginException {
+      return (available: false, width: 0, height: 0);
+    } on PlatformException {
+      return (available: false, width: 0, height: 0);
+    }
+  }
+
+  /// A tap at the virtual screen's own pixels.
+  Future<PhoneResult> vscreenTap(int x, int y) => _result('vscreenTap', {'x': x, 'y': y});
+
+  /// A swipe from `(x1,y1)` to `(x2,y2)` in virtual-screen pixels.
+  Future<PhoneResult> vscreenSwipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) =>
+      _result('vscreenSwipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'durationMs': durationMs});
+
+  /// Opens or closes the floating 虚拟屏 window. Without 显示在其他应用上层 the native side
+  /// opens the system switch and answers `reasonCode: noOverlayPermission`.
+  Future<PhoneResult> setVscreenOverlay(bool open) => _result('vscreenOverlay', {'open': open});
+
   /// The caller gates these actions on the advertised versioned capabilities.
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) => _result('setBackgroundMode', {'mode': mode.name});
 
@@ -1175,4 +1229,15 @@ class PhoneChannel {
       return PhoneResult(false, e.message ?? e.code);
     }
   }
+}
+
+/// `shellGuardCategories` as {kind: allowed}; unknown shapes mean "all on".
+Map<String, bool> _shellGuardCategories(Object? raw) {
+  if (raw is Map) {
+    return {
+      for (final e in raw.entries)
+        if (e.key is String) e.key as String: e.value == true,
+    };
+  }
+  return const <String, bool>{};
 }

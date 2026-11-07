@@ -37,6 +37,24 @@ object Proto {
     const val WANT_IMAGE = "image"
     const val DETAIL = "detail"
 
+    // 悬浮窗 预览 ([OWNER_PREVIEW]): tap/scroll by pixel, so no element id is involved.
+    const val POINT_X = "x"
+    const val POINT_Y = "y"
+    const val POINT_X2 = "x2"
+    const val POINT_Y2 = "y2"
+    const val DURATION_MS = "durationMs"
+    const val WIDTH = "width"
+    const val HEIGHT = "height"
+    const val IMAGE_BYTES = "imageBytes"
+    const val IMAGE_MIME = "imageMime"
+
+    /**
+     * The 悬浮窗's read-only owner. It never takes ownership of a display: it reads a frame from
+     * the display a task already runs and injects at the coordinates it is given, so watching the
+     * virtual screen can never take it away from that task.
+     */
+    const val OWNER_PREVIEW = "__preview__"
+
     // ops
     const val OP_PROBE = "probe"
     const val OP_CREATE = "create"

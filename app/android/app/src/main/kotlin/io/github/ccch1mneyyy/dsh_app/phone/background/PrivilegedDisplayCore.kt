@@ -245,6 +245,10 @@ class PrivilegedDisplayCore(private val context: Context) {
             response.putBoolean("released", true)
             return
         }
+        // 悬浮窗 预览 borrows whatever display a task already owns. Handled before the owner
+        // check and the package requirement: it takes no ownership, launches nothing, and never
+        // releases or recreates that display.
+        if (ownerId == Proto.OWNER_PREVIEW) return preview(op, request, response)
         if (owner != null && owner != ownerId) throw Fault("identityChanged")
         if (keyguard?.isKeyguardLocked == true) throw Fault("locked")
         val pkg = request.getString(Proto.PKG).orEmpty()
@@ -290,6 +294,60 @@ class PrivilegedDisplayCore(private val context: Context) {
             else -> throw Fault("invalidArguments")
         }
     }
+
+    // ---- 悬浮窗 预览: the read-only owner -----------------------------------
+
+    /**
+     * [Proto.OWNER_PREVIEW] reads and injects only: it never becomes [owner], and with no display
+     * running it answers `displayMissing` instead of creating one — so a preview poll can never
+     * disturb a task that starts (or has just ended) on the same channel.
+     */
+    private fun preview(op: String?, request: Bundle, response: Bundle) {
+        // Nothing running means nothing to preview: answer that instead of creating a display.
+        if (display == null || owner == null) throw Fault("displayMissing")
+        when (op) {
+            Proto.OP_OBSERVE -> previewObserve(request, response)
+            Proto.OP_TAP -> previewTap(request)
+            Proto.OP_SCROLL -> previewSwipe(request)
+            else -> throw Fault("invalidArguments")
+        }
+    }
+
+    /**
+     * One frame (or, without [Proto.WANT_IMAGE], just the display's size) from the borrowed
+     * display. Deliberately no tree read: the pixels are the person's own screen shown back to
+     * them, and a tree read would drop frames wherever it is unavailable — below API 34, or while
+     * a window of the target app can't be walked.
+     */
+    private fun previewObserve(request: Bundle, response: Bundle) {
+        response.putInt(Proto.DISPLAY_ID, displayId())
+        response.putInt(Proto.WIDTH, width)
+        response.putInt(Proto.HEIGHT, height)
+        response.putBoolean(Proto.PORTRAIT, height >= width)
+        response.putInt(Proto.COUNT, 0)
+        if (!request.getBoolean(Proto.WANT_IMAGE)) return
+        val shot = capture() ?: throw Fault("frameNotReady")
+        response.putByteArray(Proto.IMAGE_BYTES, shot.jpeg)
+        response.putString(Proto.IMAGE_MIME, "image/jpeg")
+    }
+
+    private fun previewTap(request: Bundle) {
+        val x = request.getInt(Proto.POINT_X, -1)
+        val y = request.getInt(Proto.POINT_Y, -1)
+        if (!insideDisplay(x, y)) throw Fault("invalidArguments")
+        injectTap(x, y, request.getBoolean(Proto.LONG))
+    }
+
+    private fun previewSwipe(request: Bundle) {
+        val x1 = request.getInt(Proto.POINT_X, -1); val y1 = request.getInt(Proto.POINT_Y, -1)
+        val x2 = request.getInt(Proto.POINT_X2, -1); val y2 = request.getInt(Proto.POINT_Y2, -1)
+        if (!insideDisplay(x1, y1) || !insideDisplay(x2, y2)) throw Fault("invalidArguments")
+        val duration = request.getInt(Proto.DURATION_MS, 300).coerceIn(50, 3_000)
+        injectSwipe(x1, y1, x2, y2, duration)
+    }
+
+    /** A coordinate outside the display would land on the main screen's own area. */
+    private fun insideDisplay(x: Int, y: Int): Boolean = x >= 0 && y >= 0 && x < width && y < height
 
     /** Test a real input receiver, not an empty display. Never launches or touches a user app. */
     private fun gateProbe(response: Bundle) {

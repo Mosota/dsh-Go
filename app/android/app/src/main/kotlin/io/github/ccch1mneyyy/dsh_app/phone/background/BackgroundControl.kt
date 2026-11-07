@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import android.os.SystemClock
+import android.util.Base64
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -335,6 +336,78 @@ class BackgroundControl private constructor(context: Context) {
             "reason" to response.getString(Proto.ERROR),
         )
     }
+
+    // ---- 悬浮窗 预览: the display a running task already owns, read-only -----
+
+    /**
+     * One frame of the 虚拟屏 a task is already running, for the 悬浮窗: base64 [Proto.IMAGE_BYTES]
+     * under `png` (the engine captures JPEG; Flutter decodes by content). The preview owner in
+     * [PrivilegedDisplayCore] never takes, releases or recreates that display, so polling this
+     * cannot end a task. `reasonCode` `noDisplay` means nothing is running.
+     */
+    fun frame(): Map<String, Any?> {
+        val response = preview(Proto.OP_OBSERVE) { putBoolean(Proto.WANT_IMAGE, true) }
+            ?: return previewFailure(NO_DISPLAY)
+        val bytes = response.getByteArray(Proto.IMAGE_BYTES) ?: return previewFailure(response)
+        return mapOf(
+            "ok" to true,
+            "width" to response.getInt(Proto.WIDTH),
+            "height" to response.getInt(Proto.HEIGHT),
+            "mime" to response.getString(Proto.IMAGE_MIME),
+            "png" to Base64.encodeToString(bytes, Base64.NO_WRAP),
+        )
+    }
+
+    /** Whether the 悬浮窗 has anything to show, and its pixel size. */
+    fun vscreenState(): Map<String, Any?> {
+        val response = preview(Proto.OP_OBSERVE) {} ?: return previewFailure(NO_DISPLAY)
+        return mapOf(
+            "available" to response.getBoolean(Proto.OK),
+            "width" to response.getInt(Proto.WIDTH),
+            "height" to response.getInt(Proto.HEIGHT),
+        )
+    }
+
+    /** A tap at virtual-screen pixels (the caller maps its own view's size first). */
+    fun vscreenTap(x: Int, y: Int): Map<String, Any?> = previewResult(preview(Proto.OP_TAP) {
+        putInt(Proto.POINT_X, x)
+        putInt(Proto.POINT_Y, y)
+    })
+
+    fun vscreenSwipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Map<String, Any?> =
+        previewResult(preview(Proto.OP_SCROLL) {
+            putInt(Proto.POINT_X, x1)
+            putInt(Proto.POINT_Y, y1)
+            putInt(Proto.POINT_X2, x2)
+            putInt(Proto.POINT_Y2, y2)
+            putInt(Proto.DURATION_MS, durationMs)
+        })
+
+    /** One request as [Proto.OWNER_PREVIEW]; null when there is no channel to send it on. */
+    private fun preview(op: String, fill: Bundle.() -> Unit): Bundle? {
+        val ch = activeChannel() ?: return null
+        val request = Bundle()
+        request.putString(Proto.OP, op)
+        request.putString(Proto.OWNER, Proto.OWNER_PREVIEW)
+        request.fill()
+        return runCatching { ch.execute(request) }.getOrNull()
+    }
+
+    private fun previewResult(response: Bundle?): Map<String, Any?> {
+        if (response == null) return previewFailure(NO_DISPLAY)
+        if (response.getBoolean(Proto.OK)) return mapOf("ok" to true)
+        return previewFailure(response)
+    }
+
+    private fun previewFailure(response: Bundle): Map<String, Any?> =
+        previewFailure(response.getString(Proto.ERROR) ?: NO_DISPLAY)
+
+    // l10n:keep agent-vs-screen wording (the floating window shows the same line)
+    private fun previewFailure(code: String): Map<String, Any?> = mapOf(
+        "ok" to false,
+        "reasonCode" to code,
+        "reason" to if (code == NO_DISPLAY) "虚拟屏未运行" else Reasons.of(code),
+    )
 
     // ---- task lifecycle (called by the bridge/core) ------------------------
 
@@ -684,6 +757,9 @@ class BackgroundControl private constructor(context: Context) {
 
         private const val PREFS = "dsh_phone_background"
         private const val K_VDISPLAY = "vdisplayEnabled"
+
+        /** `reasonCode` of a preview request with no display (or no channel) to read. */
+        const val NO_DISPLAY = "noDisplay"
 
         @Volatile private var instance: BackgroundControl? = null
         fun get(context: Context): BackgroundControl =

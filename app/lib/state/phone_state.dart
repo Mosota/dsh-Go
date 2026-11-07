@@ -208,6 +208,20 @@ class PhoneController extends Notifier<PhoneState> {
   /// 虚拟屏's own switch (the privileged channel stays for the model's `shell`).
   Future<bool> setVdisplayEnabled(bool enabled) => _thenRefresh(_channel.setVdisplayEnabled(enabled));
 
+  /// 悬浮窗查看虚拟屏: the floating window over other apps. A refusal carries the reason
+  /// (no 显示在其他应用上层 comes back as `noOverlayPermission`).
+  Future<PhoneResult> openVscreenOverlay() async {
+    final result = await _channel.setVscreenOverlay(true);
+    if (ref.mounted) ref.read(vscreenOverlayProvider.notifier).update(result.ok);
+    return result;
+  }
+
+  Future<PhoneResult> closeVscreenOverlay() async {
+    final result = await _channel.setVscreenOverlay(false);
+    if (ref.mounted) ref.read(vscreenOverlayProvider.notifier).update(false);
+    return result;
+  }
+
   /// #153: independent switch for the model's `shell`/`device` tools.
   Future<bool> setShellAllowed(bool allowed) => _thenRefresh(_channel.setShellAllowed(allowed));
 
@@ -357,6 +371,17 @@ class PhoneController extends Notifier<PhoneState> {
 }
 
 final phoneProvider = NotifierProvider<PhoneController, PhoneState>(PhoneController.new);
+
+/// 悬浮窗查看虚拟屏: whether the floating window is on. Runtime-only — native status says
+/// nothing about it, and the system may stop the service on its own.
+class VscreenOverlayOn extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void update(bool value) => state = value;
+}
+
+final vscreenOverlayProvider = NotifierProvider<VscreenOverlayOn, bool>(VscreenOverlayOn.new);
 
 /// Why phone control can't work right now; null when nothing stands in the way.
 enum PhoneBlocker {
