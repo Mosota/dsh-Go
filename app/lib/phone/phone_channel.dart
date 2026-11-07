@@ -388,6 +388,7 @@ class PhoneStatus {
     this.enabled = false,
     this.shellAllowed = false,
     this.shellGuard = true,
+    this.guardCategories = const {},
     this.bridgeListening = false,
     this.a11y = const PhoneA11yStatus(),
     this.a11yKeeper = const A11yKeeperStatus(),
@@ -405,6 +406,7 @@ class PhoneStatus {
       enabled = false,
       shellAllowed = false,
       shellGuard = true,
+      guardCategories = const {},
       bridgeListening = false,
       a11y = const PhoneA11yStatus(),
       a11yKeeper = const A11yKeeperStatus(),
@@ -419,6 +421,16 @@ class PhoneStatus {
     enabled: _flag(m['enabled']),
     shellAllowed: _flag(m['shellAllowed']),
     shellGuard: m['shellGuard'] == null ? true : _flag(m['shellGuard']),
+    guardCategories: {
+      final raw = m['shellGuardCategories'];
+      if (raw is Map) {
+        return {
+          for (final e in raw.entries)
+            if (e.key is String) e.key as String: e.value == true,
+        };
+      }
+      return const <String, bool>{};
+    }(),
     bridgeListening: _flag(m['bridgeListening']),
     a11y: PhoneA11yStatus.fromMap(_map(m['a11y'])),
     a11yKeeper: A11yKeeperStatus.fromMap(_map(m['a11yKeeper'])),
@@ -444,6 +456,9 @@ class PhoneStatus {
 
   /// Dangerous shell commands are refused before they reach the channel.
   final bool shellGuard;
+
+  /// Per-category consent under 拦截危险命令: uninstall / security / files / power.
+  final Map<String, bool> guardCategories;
   final bool bridgeListening;
   final PhoneA11yStatus a11y;
   final A11yKeeperStatus a11yKeeper;
@@ -465,6 +480,7 @@ class PhoneStatus {
     enabled: enabled ?? this.enabled,
     shellAllowed: shellAllowed ?? this.shellAllowed,
     shellGuard: shellGuard ?? this.shellGuard,
+    guardCategories: guardCategories,
     bridgeListening: bridgeListening,
     a11y: a11y,
     a11yKeeper: a11yKeeper,
@@ -983,6 +999,9 @@ class PhoneChannel {
   Future<bool> shellAllowed() => _bool('shellAllowed');
 
   Future<bool> setShellGuard(bool guard) => _bool('setShellGuard', {'guard': guard});
+
+  Future<bool> setShellGuardCategory(String kind, bool allowed) =>
+      _bool('setShellGuardCategory', {'kind': kind, 'allowed': allowed});
 
   /// 虚拟屏's own switch: off keeps the privileged channel for the model's `shell`.
   Future<bool> setVdisplayEnabled(bool enabled) => _bool('setVdisplayEnabled', {'enabled': enabled});

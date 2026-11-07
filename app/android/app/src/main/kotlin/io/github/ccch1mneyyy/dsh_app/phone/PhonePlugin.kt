@@ -144,6 +144,10 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
             "setShellAllowed" -> async(result) { control.setShellAllowed(call.argument<Boolean>("allowed") == true) }
             "shellAllowed" -> result.success(control.shellAllowed())
             "setShellGuard" -> async(result) { control.setShellGuard(call.argument<Boolean>("guard") == true) }
+            "setShellGuardCategory" -> async(result) {
+                val kind = call.argument<String>("kind").orEmpty()
+                control.setShellGuardCategory(kind, call.argument<Boolean>("allowed") == true)
+            }
             "setVdisplayEnabled" -> async(result) { control.background.setVdisplayEnabled(call.argument<Boolean>("enabled") == true) }
             "setBackgroundMode" -> {
                 val mode = call.argument<String>("mode") ?: "off"

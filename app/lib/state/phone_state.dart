@@ -213,6 +213,9 @@ class PhoneController extends Notifier<PhoneState> {
 
   Future<bool> setShellGuard(bool guard) => _thenRefresh(_channel.setShellGuard(guard));
 
+  Future<bool> setShellGuardCategory(String kind, bool allowed) =>
+      _thenRefresh(_channel.setShellGuardCategory(kind, allowed));
+
   /// Refused before any channel call when the native side doesn't offer [mode].
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) =>
       _ifSupported(mode, () => _channel.setPrivilegedMode(mode));

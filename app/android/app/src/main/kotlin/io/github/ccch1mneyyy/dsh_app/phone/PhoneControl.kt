@@ -170,6 +170,33 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     override fun shellGuard(): Boolean = shellGuard()
 
+    /** Per-category switches under 拦截危险命令; all default on. */
+    fun shellGuardCategory(kind: String): Boolean = prefs.getBoolean(
+        when (kind) {
+            "uninstall" -> K_GUARD_UNINSTALL
+            "security" -> K_GUARD_SECURITY
+            "files" -> K_GUARD_FILES
+            "power" -> K_GUARD_POWER
+            else -> return true
+        },
+        true,
+    )
+
+    fun setShellGuardCategory(kind: String, allowed: Boolean): Boolean {
+        val key = when (kind) {
+            "uninstall" -> K_GUARD_UNINSTALL
+            "security" -> K_GUARD_SECURITY
+            "files" -> K_GUARD_FILES
+            "power" -> K_GUARD_POWER
+            else -> return false
+        }
+        prefs.edit().putBoolean(key, allowed).apply()
+        emitStatus()
+        return true
+    }
+
+    override fun shellGuardCategory(kind: String): Boolean = shellGuardCategory(kind)
+
     fun setShellAllowed(allowed: Boolean): Boolean {
         prefs.edit().putBoolean(K_SHELL, allowed).apply()
         emitStatus()
@@ -465,6 +492,12 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         "enabled" to isEnabled(),
         "shellAllowed" to shellAllowed(),
         "shellGuard" to shellGuard(),
+        "shellGuardCategories" to linkedMapOf(
+            "uninstall" to shellGuardCategory("uninstall"),
+            "security" to shellGuardCategory("security"),
+            "files" to shellGuardCategory("files"),
+            "power" to shellGuardCategory("power"),
+        ),
         "bridgeListening" to bridge.listening,
         "a11y" to linkedMapOf("enabled" to a11yEnabledInSettings(), "serviceConnected" to (PhoneRegistry.mainDriver != null)),
         "overlay" to (PhoneRegistry.overlayGate != null),
@@ -695,6 +728,10 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         private const val K_TCP_FALLBACK = "tcpFallback"
         private const val K_SHELL = "modelShell"
         private const val K_SHELL_GUARD = "shellGuard"
+        private const val K_GUARD_UNINSTALL = "shellGuard_uninstall"
+        private const val K_GUARD_SECURITY = "shellGuard_security"
+        private const val K_GUARD_FILES = "shellGuard_files"
+        private const val K_GUARD_POWER = "shellGuard_power"
         private const val CHANNEL_FIX = "dsh-phone-fix"
         private const val NOTIFY_FIX_ID = 4099
 

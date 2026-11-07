@@ -32,6 +32,9 @@ interface PhoneEnv {
 
     /** Whether dangerous commands are refused before they reach the channel (user choice). */
     fun shellGuard(): Boolean = true
+
+    /** Per-category consent: `uninstall` / `security` / `files` / `power`. */
+    fun shellGuardCategory(kind: String): Boolean = true
     fun sleep(ms: Long) = Thread.sleep(ms)
 }
 
@@ -180,24 +183,31 @@ class PhoneCore(
      * are refused here and handed back to the person instead. The list is a second line of defence:
      * the privileged channel itself already only accepts what this app asks it to run.
      */
-    private val SHELL_DENY = listOf(
-        Regex("""\bpm\s+(uninstall|clear|disable-user)"""),
-        Regex("""\bpm\s+revoke"""),
-        Regex("""\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(/|/data|/system|/sdcard)\b"""),
-        Regex("""\bmkfs\."""),
-        Regex("""\bdd\s+if=.*\bof=/dev/"""),
-        Regex("""\bsettings\s+put\s+(secure|global)\s+"""),
-        Regex("""\bam\s+(force-stop\s+com\.android|broadcast.*BOOT_COMPLETED)"""),
-        Regex("""\bwipe\b"""),
-        Regex("""\breboot\b"""),
-        Regex("""\bsu\b"""),
+    private val SHELL_DENY: List<Pair<String, Regex>> = listOf(
+        // 卸载 / 清数据
+        "uninstall" to Regex("""\bpm\s+(uninstall|clear|disable-user)"""),
+        "uninstall" to Regex("""\bpm\s+revoke"""),
+        // 改安全设置
+        "security" to Regex("""\bsettings\s+put\s+(secure|global)\s+"""),
+        "security" to Regex("""\bam\s+(force-stop\s+com\.android|broadcast.*BOOT_COMPLETED)"""),
+        // 删文件
+        "files" to Regex("""\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(/|/data|/system|/sdcard)\b"""),
+        "files" to Regex("""\bmkfs\."""),
+        "files" to Regex("""\bdd\s+if=.*\bof=/dev/"""),
+        "files" to Regex("""\bwipe\b"""),
+        // 关机 / 提权
+        "power" to Regex("""\breboot\b"""),
+        "power" to Regex("""\bsu\b"""),
     )
 
     private fun shell(a: Args): Out {
         val cmd = a.text("cmd")?.trim().orEmpty()
         // l10n:keep agent tool result
         if (cmd.isEmpty()) return Out("需要 cmd：要执行的命令。", error = true, summary = "shell", decision = "invalid")
-        val hit = if (env.shellGuard()) SHELL_DENY.firstOrNull { it.containsMatchIn(cmd) } else null
+        val guarded = env.shellGuard()
+        val hit = if (!guarded) null else SHELL_DENY.firstOrNull { (kind, re) ->
+            env.shellGuardCategory(kind) && re.containsMatchIn(cmd)
+        }?.second
         if (hit != null) {
             // l10n:keep agent tool result
             return Out(

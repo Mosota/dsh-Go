@@ -15,6 +15,14 @@ import 'phone_widgets.dart';
 
 /// The commands the core refuses before they reach the channel (mirrors
 /// `PhoneCore.SHELL_DENY`; listed here so the page is honest about it).
+/// (kind, 标题, 说明) — the four switches under 拦截危险命令.
+const _categories = <(String, String, String)>[
+  ('uninstall', '卸载 / 清数据', 'pm uninstall、pm clear、pm disable-user、pm revoke'),
+  ('security', '改安全设置', 'settings put secure/global、停用系统组件、伪造开机广播'),
+  ('files', '删文件', 'rm -rf 系统或数据目录、mkfs、dd 写块设备、wipe'),
+  ('power', '关机 / 提权', 'reboot、su'),
+];
+
 const _refused = <String>[
   '卸载 / 清数据（pm uninstall、pm clear）',
   '改安全设置（device_policies、锁屏、ADB 开关）',
@@ -76,17 +84,37 @@ class ShellToolPage extends ConsumerWidget {
             ),
           ],
         ),
-        ListPageCard(
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          title: '被拦截时拒绝的命令',
-          children: [
-            for (final line in _refused)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: Text('· $line'),
-              ),
-          ],
-        ),
+        if (status.shellGuard)
+          ListPageCard(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            title: '拦截哪几类',
+            children: [
+              for (final (kind, label, hint) in _categories)
+                ListPageRow(
+                  title: label,
+                  subtitle: hint,
+                  onTap: () => unawaited(
+                    notifier.setShellGuardCategory(kind, !(status.guardCategories[kind] ?? true)),
+                  ),
+                  trailing: Switch(
+                    value: status.guardCategories[kind] ?? true,
+                    onChanged: (v) => unawaited(notifier.setShellGuardCategory(kind, v)),
+                  ),
+                ),
+            ],
+          ),
+        if (!status.shellGuard)
+          ListPageCard(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            title: '关闭拦截后，模型可以执行',
+            children: [
+              for (final line in _refused)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: Text('· $line'),
+                ),
+            ],
+          ),
         ListPageCard(
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           title: '说明',
