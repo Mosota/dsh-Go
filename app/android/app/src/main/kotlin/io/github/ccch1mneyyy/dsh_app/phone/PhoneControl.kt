@@ -161,7 +161,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     fun shellAllowed(): Boolean = prefs.getBoolean(K_SHELL, false)
 
     /** Dangerous commands are refused unless the person turned the guard off. */
-    fun shellGuard(): Boolean = prefs.getBoolean(K_SHELL_GUARD, true)
+    override fun shellGuard(): Boolean = prefs.getBoolean(K_SHELL_GUARD, true)
 
     fun setShellGuard(guard: Boolean): Boolean {
         prefs.edit().putBoolean(K_SHELL_GUARD, guard).apply()
@@ -169,10 +169,9 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         return true
     }
 
-    override fun shellGuard(): Boolean = shellGuard()
 
     /** Per-category switches under 拦截危险命令; all default on. */
-    fun shellGuardCategory(kind: String): Boolean = prefs.getBoolean(
+    override fun shellGuardCategory(kind: String): Boolean = prefs.getBoolean(
         when (kind) {
             "uninstall" -> K_GUARD_UNINSTALL
             "security" -> K_GUARD_SECURITY
@@ -196,7 +195,6 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         return true
     }
 
-    override fun shellGuardCategory(kind: String): Boolean = shellGuardCategory(kind)
 
     fun setShellAllowed(allowed: Boolean): Boolean {
         prefs.edit().putBoolean(K_SHELL, allowed).apply()
