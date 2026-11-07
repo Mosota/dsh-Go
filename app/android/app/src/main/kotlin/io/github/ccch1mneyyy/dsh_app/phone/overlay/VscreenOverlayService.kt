@@ -229,6 +229,8 @@ class VscreenOverlayService : Service() {
         try {
             windows.addView(frame, p)
             root = frame
+            // The ball stays above the picture: the two are the same kind of window.
+            VscreenBallService.bump()
         } catch (e: Exception) {
             // The vendor's own floating-window switch can refuse after canDrawOverlays said yes.
             Log.w(TAG, "vscreen overlay window refused", e)

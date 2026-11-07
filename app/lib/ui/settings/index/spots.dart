@@ -365,6 +365,7 @@ final _pages = <SettingsPageMeta>[
     SettingsPageId.phoneBall,
     title: (l) => '悬浮球',
     parent: SettingsPageId.phoneDnd,
+    keywords: (l) => '悬浮球,小球',
     links: const ['ball'],
     condition: SpotCondition.phoneControlOn,
   ),

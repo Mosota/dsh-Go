@@ -89,7 +89,6 @@ class VscreenBallService : Service() {
     private var params: WindowManager.LayoutParams? = null
 
     private var panel: PanelView? = null
-    private var panelParams: WindowManager.LayoutParams? = null
     private var viewRow: MenuRow? = null
     private var panelOpen = false
 
@@ -135,6 +134,7 @@ class VscreenBallService : Service() {
         yFraction = VscreenBallPrefs.savedY(this)
         VscreenBallPrefs.prefs(this).registerOnSharedPreferenceChangeListener(prefChange)
         showing = true
+        instance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -160,6 +160,7 @@ class VscreenBallService : Service() {
     override fun onDestroy() {
         live = false
         showing = false
+        instance = null
         main.removeCallbacks(idle)
         glide?.cancel()
         glide = null
@@ -174,7 +175,6 @@ class VscreenBallService : Service() {
         panel = null
         viewRow = null
         params = null
-        panelParams = null
         super.onDestroy()
     }
 
@@ -443,14 +443,12 @@ class VscreenBallService : Service() {
             if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
         }
         panel = view
-        panelParams = p
         try {
             windows.addView(view, p)
         } catch (e: Exception) {
             Log.w(TAG, "vscreen ball menu refused", e)
             panel = null
-            panelParams = null
-            panelOpen = false
+                panelOpen = false
             scheduleIdle()
             return
         }
@@ -469,6 +467,8 @@ class VscreenBallService : Service() {
     private fun bringBallToFront() {
         val view = root ?: return
         val p = params ?: return
+        // Mid-gesture the window must not move under the finger: the next touch puts it on top.
+        if (dragging) return
         view.animate().cancel()
         runCatching { windows.removeViewImmediate(view) }
         runCatching { windows.addView(view, p) }.onFailure { Log.w(TAG, "vscreen ball could not stay on top", it) }
@@ -497,8 +497,7 @@ class VscreenBallService : Service() {
         val remove = {
             if (panel === view) {
                 panel = null
-                panelParams = null
-            }
+                    }
             runCatching { windows.removeViewImmediate(view) }
         }
         if (!animated || !OverlayMotion.on()) {
@@ -516,8 +515,9 @@ class VscreenBallService : Service() {
         val view = PanelView(this, palette)
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val rowParams = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(ROW_DP)) }
-        viewRow = menuRow(MenuGlyph.SCREEN, "查看虚拟屏") { openVscreen() }
-        column.addView(viewRow, rowParams())
+        val first = menuRow(MenuGlyph.SCREEN, "查看虚拟屏") { openVscreen() }
+        viewRow = first
+        column.addView(first, rowParams())
         column.addView(menuRow(MenuGlyph.SLIDERS, "虚拟屏设置") { openApp(LINK_VSCREEN) }, rowParams())
         column.addView(menuRow(MenuGlyph.BALL, "悬浮球设置") { openApp(LINK_BALL) }, rowParams())
         column.addView(menuRow(MenuGlyph.POWER, "关闭悬浮球") { closePanel(false); stopSelf() }, rowParams())
@@ -530,7 +530,6 @@ class VscreenBallService : Service() {
     private fun menuRow(glyph: MenuGlyph, title: String, action: () -> Unit): MenuRow =
         MenuRow(this, palette, glyph, title).apply {
             isClickable = true
-            isFocusable = true
             setOnClickListener { action() }
         }
 
@@ -648,12 +647,7 @@ class VscreenBallService : Service() {
             surface.draw(canvas, rect, width / 2f, palette)
             paint.color = palette.accent
             paint.alpha = (255 * 0.9f).roundToInt()
-            drawScreen(canvas, width / 2f, height / 2f, context.dpf(GLYPH_DP.toFloat()), paint, path, rect)
-        }
-
-        private companion object {
-            /** The screen mark on the glyphs' 24-unit grid. */
-            const val GLYPH_DP = 22
+            drawScreen(canvas, width / 2f, height / 2f, context.dpf(BALL_GLYPH_DP.toFloat()), paint, path, rect)
         }
     }
 
@@ -698,17 +692,18 @@ class VscreenBallService : Service() {
             return super.dispatchTouchEvent(ev)
         }
 
-        private companion object {
-            /** The card's own margin round its rows, inside the surface. */
-            const val INNER_PAD_DP = 6
-        }
-
+        /** The back gesture: the card goes, and nothing behind it sees the key. */
         override fun dispatchKeyEvent(event: KeyEvent): Boolean {
             if (event.keyCode == KeyEvent.KEYCODE_BACK) {
                 if (event.action == KeyEvent.ACTION_UP) onOutside()
                 return true
             }
             return super.dispatchKeyEvent(event)
+        }
+
+        private companion object {
+            /** The card's own margin round its rows, inside the surface. */
+            const val INNER_PAD_DP = 6
         }
     }
 
@@ -802,6 +797,20 @@ class VscreenBallService : Service() {
         var showing = false
             private set
 
+        /** The running service, for [bump] (the same process; null while it is away). */
+        @Volatile
+        private var instance: VscreenBallService? = null
+
+        /**
+         * The 虚拟屏 window was just added: the ball goes above it again. Both windows are
+         * [WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY], so the one added last wins.
+         */
+        fun bump() {
+            val service = instance ?: return
+            if (Looper.myLooper() == Looper.getMainLooper()) service.bringBallToFront()
+            else service.main.post { service.bringBallToFront() }
+        }
+
         /**
          * Opens or closes the ball. Without [Settings.canDrawOverlays] nothing is started: the
          * caller says what to turn on ([NO_PERMISSION]), unlike the picture window, which opens
@@ -840,6 +849,9 @@ class VscreenBallService : Service() {
 
         /** Half-hidden: the window sits this far past the edge, so its circle is half off. */
         private const val HALF_OUT_DP = 4
+
+        /** The screen mark on the ball, on the glyphs' 24-unit grid. */
+        private const val BALL_GLYPH_DP = 22
 
         private const val PANEL_W_DP = 200
         private const val PANEL_EDGE_DP = 8

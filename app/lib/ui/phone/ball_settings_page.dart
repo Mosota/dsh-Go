@@ -37,6 +37,9 @@ class _PhoneBallSettingsPageState extends ConsumerState<PhoneBallSettingsPage> {
   Future<void> _load() async {
     final prefs = await ref.read(phoneProvider.notifier).ballPrefs();
     if (!mounted || prefs == null) return;
+    // A ball opened from the 虚拟屏 window's 关闭 (or still up from last time) is
+    // on, whatever this run of the app has done so far.
+    ref.read(vscreenBallProvider.notifier).update(prefs.showing);
     setState(() => _prefs = prefs);
   }
 
@@ -135,7 +138,7 @@ class _PhoneBallSettingsPageState extends ConsumerState<PhoneBallSettingsPage> {
                 ),
               ),
               _BallSliderRow(
-                icon: AppIcons.queued,
+                icon: AppIcons.alarmClock,
                 title: '闲置秒数',
                 label: '${prefs.idleSeconds} 秒',
                 value: prefs.idleSeconds.toDouble(),
