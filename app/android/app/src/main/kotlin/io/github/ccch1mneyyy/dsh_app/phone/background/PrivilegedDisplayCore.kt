@@ -312,10 +312,20 @@ class PrivilegedDisplayCore(private val context: Context) {
                     try { window.close() } finally { probeDetail = window.failureDetail }
                 }
             }
-            response.putBoolean(Proto.INJECT_OK, injection.isSuccess)
-            injection.exceptionOrNull()?.let {
-                response.putString(Proto.INJECT_ERROR, failureCode(it))
-                (probeDetail ?: failureDetail(it))?.let { detail -> response.putString(Proto.ERROR_DETAIL, detail) }
+            val denied = injection.exceptionOrNull()
+            val windowDenied = denied is SecurityException || denied?.cause is SecurityException
+            // A ROM that forbids a shell-uid window (SecurityException while creating the
+            // probe's Presentation) tells us nothing about input delivery: report it as
+            // untested, so the channel is still usable for shell and virtual-screen work.
+            if (windowDenied && denied != null) {
+                response.putString(Proto.INJECT_UNVERIFIED, "windowDenied")
+                (probeDetail ?: failureDetail(denied))?.let { detail -> response.putString(Proto.ERROR_DETAIL, detail) }
+            } else {
+                response.putBoolean(Proto.INJECT_OK, injection.isSuccess)
+                injection.exceptionOrNull()?.let {
+                    response.putString(Proto.INJECT_ERROR, failureCode(it))
+                    (probeDetail ?: failureDetail(it))?.let { detail -> response.putString(Proto.ERROR_DETAIL, detail) }
+                }
             }
         } finally {
             releaseAll()

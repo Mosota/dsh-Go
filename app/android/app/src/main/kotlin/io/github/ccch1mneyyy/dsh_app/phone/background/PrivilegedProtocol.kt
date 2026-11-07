@@ -71,6 +71,13 @@ object Proto {
     const val TRUNCATED = "truncated"
 
     const val INJECT_OK = "injectOk"
+
+    /**
+     * Gate only: the injection could not be tested at all (the ROM refused the probe
+     * window, e.g. SecurityException while creating the test Presentation). Untested,
+     * not broken — the channel stays usable and the reason is shown as a warning.
+     */
+    const val INJECT_UNVERIFIED = "injectUnverified"
     /** Gate only, with INJECT_OK false: the failing injection's [ERROR] code. Older cores omit it. */
     const val INJECT_ERROR = "injectError"
     /** With [ERROR] deviceUnavailable: the failing step's exception type, never its message. Older cores omit it. */
