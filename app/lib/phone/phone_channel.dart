@@ -387,6 +387,7 @@ class PhoneStatus {
     this.error,
     this.enabled = false,
     this.shellAllowed = false,
+    this.shellGuard = true,
     this.bridgeListening = false,
     this.a11y = const PhoneA11yStatus(),
     this.a11yKeeper = const A11yKeeperStatus(),
@@ -403,6 +404,7 @@ class PhoneStatus {
     : ready = false,
       enabled = false,
       shellAllowed = false,
+      shellGuard = true,
       bridgeListening = false,
       a11y = const PhoneA11yStatus(),
       a11yKeeper = const A11yKeeperStatus(),
@@ -416,6 +418,7 @@ class PhoneStatus {
   factory PhoneStatus.fromMap(Map<Object?, Object?> m) => PhoneStatus(
     enabled: _flag(m['enabled']),
     shellAllowed: _flag(m['shellAllowed']),
+    shellGuard: m['shellGuard'] == null ? true : _flag(m['shellGuard']),
     bridgeListening: _flag(m['bridgeListening']),
     a11y: PhoneA11yStatus.fromMap(_map(m['a11y'])),
     a11yKeeper: A11yKeeperStatus.fromMap(_map(m['a11yKeeper'])),
@@ -438,6 +441,9 @@ class PhoneStatus {
 
   /// #153: the model may use the `shell`/`device` tools (independent of 虚拟屏).
   final bool shellAllowed;
+
+  /// Dangerous shell commands are refused before they reach the channel.
+  final bool shellGuard;
   final bool bridgeListening;
   final PhoneA11yStatus a11y;
   final A11yKeeperStatus a11yKeeper;
@@ -453,11 +459,12 @@ class PhoneStatus {
   final PhoneTaskStatus task;
   final PhoneDevice device;
 
-  PhoneStatus copyWith({bool? enabled, bool? shellAllowed}) => PhoneStatus(
+  PhoneStatus copyWith({bool? enabled, bool? shellAllowed, bool? shellGuard}) => PhoneStatus(
     ready: ready,
     error: error,
     enabled: enabled ?? this.enabled,
     shellAllowed: shellAllowed ?? this.shellAllowed,
+    shellGuard: shellGuard ?? this.shellGuard,
     bridgeListening: bridgeListening,
     a11y: a11y,
     a11yKeeper: a11yKeeper,
@@ -974,6 +981,8 @@ class PhoneChannel {
   Future<bool> setShellAllowed(bool allowed) => _bool('setShellAllowed', {'allowed': allowed});
 
   Future<bool> shellAllowed() => _bool('shellAllowed');
+
+  Future<bool> setShellGuard(bool guard) => _bool('setShellGuard', {'guard': guard});
 
   /// 虚拟屏's own switch: off keeps the privileged channel for the model's `shell`.
   Future<bool> setVdisplayEnabled(bool enabled) => _bool('setVdisplayEnabled', {'enabled': enabled});

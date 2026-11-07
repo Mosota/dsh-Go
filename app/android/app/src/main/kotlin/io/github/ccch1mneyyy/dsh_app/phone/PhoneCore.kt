@@ -29,6 +29,9 @@ interface PhoneEnv {
     fun privilegedExec(cmd: String, timeoutMs: Int?, cwd: String?): Map<String, Any?>? = null
     /** #153: one-shot device facts; null while the privileged channel is not usable. */
     fun privilegedDump(): Map<String, Any?>? = null
+
+    /** Whether dangerous commands are refused before they reach the channel (user choice). */
+    fun shellGuard(): Boolean = true
     fun sleep(ms: Long) = Thread.sleep(ms)
 }
 
@@ -194,7 +197,7 @@ class PhoneCore(
         val cmd = a.text("cmd")?.trim().orEmpty()
         // l10n:keep agent tool result
         if (cmd.isEmpty()) return Out("需要 cmd：要执行的命令。", error = true, summary = "shell", decision = "invalid")
-        val hit = SHELL_DENY.firstOrNull { it.containsMatchIn(cmd) }
+        val hit = if (env.shellGuard()) SHELL_DENY.firstOrNull { it.containsMatchIn(cmd) } else null
         if (hit != null) {
             // l10n:keep agent tool result
             return Out(

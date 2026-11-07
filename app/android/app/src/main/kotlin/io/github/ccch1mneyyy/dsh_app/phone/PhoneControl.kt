@@ -159,6 +159,17 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     /** #153: whether the model may use the `shell`/`device` tools (independent of 不打扰模式). */
     fun shellAllowed(): Boolean = prefs.getBoolean(K_SHELL, false)
 
+    /** Dangerous commands are refused unless the person turned the guard off. */
+    fun shellGuard(): Boolean = prefs.getBoolean(K_SHELL_GUARD, true)
+
+    fun setShellGuard(guard: Boolean): Boolean {
+        prefs.edit().putBoolean(K_SHELL_GUARD, guard).apply()
+        emitStatus()
+        return true
+    }
+
+    override fun shellGuard(): Boolean = shellGuard()
+
     fun setShellAllowed(allowed: Boolean): Boolean {
         prefs.edit().putBoolean(K_SHELL, allowed).apply()
         emitStatus()
@@ -453,6 +464,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     fun status(): Map<String, Any?> = linkedMapOf(
         "enabled" to isEnabled(),
         "shellAllowed" to shellAllowed(),
+        "shellGuard" to shellGuard(),
         "bridgeListening" to bridge.listening,
         "a11y" to linkedMapOf("enabled" to a11yEnabledInSettings(), "serviceConnected" to (PhoneRegistry.mainDriver != null)),
         "overlay" to (PhoneRegistry.overlayGate != null),
@@ -682,6 +694,7 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         private const val K_POLICIES = "policies"
         private const val K_TCP_FALLBACK = "tcpFallback"
         private const val K_SHELL = "modelShell"
+        private const val K_SHELL_GUARD = "shellGuard"
         private const val CHANNEL_FIX = "dsh-phone-fix"
         private const val NOTIFY_FIX_ID = 4099
 

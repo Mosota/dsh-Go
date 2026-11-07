@@ -211,6 +211,8 @@ class PhoneController extends Notifier<PhoneState> {
   /// #153: independent switch for the model's `shell`/`device` tools.
   Future<bool> setShellAllowed(bool allowed) => _thenRefresh(_channel.setShellAllowed(allowed));
 
+  Future<bool> setShellGuard(bool guard) => _thenRefresh(_channel.setShellGuard(guard));
+
   /// Refused before any channel call when the native side doesn't offer [mode].
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) =>
       _ifSupported(mode, () => _channel.setPrivilegedMode(mode));

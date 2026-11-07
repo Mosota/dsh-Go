@@ -63,7 +63,22 @@ class ShellToolPage extends ConsumerWidget {
         ),
         ListPageCard(
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          title: '会被直接拒绝的命令',
+          children: [
+            ListPageRow(
+              icon: Icons.shield_outlined,
+              title: '拦截危险命令',
+              subtitle: status.shellGuard ? '开启：下面这些命令会被直接拒绝' : '已关闭：模型可以执行下面这些命令，风险自负',
+              onTap: () => unawaited(notifier.setShellGuard(!status.shellGuard)),
+              trailing: Switch(
+                value: status.shellGuard,
+                onChanged: (v) => unawaited(notifier.setShellGuard(v)),
+              ),
+            ),
+          ],
+        ),
+        ListPageCard(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          title: '被拦截时拒绝的命令',
           children: [
             for (final line in _refused)
               Padding(
