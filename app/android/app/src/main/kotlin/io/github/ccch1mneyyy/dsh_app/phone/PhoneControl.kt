@@ -26,6 +26,7 @@ import io.github.ccch1mneyyy.dsh_app.phone.a11y.A11yKeeper
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.PhoneA11yService
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl
 import io.github.ccch1mneyyy.dsh_app.phone.background.SecureSettingsGrant
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenBallService
 import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenOverlayService
 import io.github.ccch1mneyyy.dsh_app.runtime.DshService
 import io.github.ccch1mneyyy.dsh_app.runtime.PowerSave
@@ -480,6 +481,9 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     /** 悬浮窗查看虚拟屏: opens or closes the floating window (needs 显示在其他应用上层). */
     fun vscreenOverlay(open: Boolean): Map<String, Any?> = VscreenOverlayService.ensure(app, open)
+
+    /** 悬浮球: opens or closes the floating ball (needs 显示在其他应用上层). */
+    fun ballOverlay(open: Boolean): Map<String, Any?> = VscreenBallService.ensure(app, open)
 
     /**
      * 「读一下当前屏幕」: the person's own on-device check, never sent to a model, so it shows

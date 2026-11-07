@@ -28,6 +28,7 @@ import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'action_log_page.dart';
 import 'a11y_restore_sheet.dart';
+import 'ball_settings_page.dart';
 import 'app_rules_page.dart';
 import 'dnd_mode_page.dart';
 import 'phone_disclosure_sheet.dart';
@@ -516,6 +517,16 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
             subtitle: context.l10n.phoneReturnAfterDoneHint,
             onTap: () => unawaited(_setReturn(!returnAfterDone)),
             trailing: Switch(value: returnAfterDone, onChanged: (v) => unawaited(_setReturn(v))),
+          ),
+        ),
+        MergeSemantics(
+          child: ListPageRow(
+            icon: AppIcons.overlayBall,
+            title: '悬浮球',
+            subtitle: '虚拟屏的小球：大小、不透明度、闲置半隐',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const PhoneBallSettingsPage()),
+            ),
           ),
         ),
       ],

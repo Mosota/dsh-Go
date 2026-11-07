@@ -529,6 +529,86 @@ class PhoneOverlayPrefs {
   int get hashCode => Object.hash(idleOpacity, autoCollapse);
 }
 
+// ── 悬浮球 ───────────────────────────────────────────────────────────────────
+
+/// 设置 → 手机操控 → 悬浮球 (`ballPrefs` / `setBallPrefs`): how big the ball is, how
+/// opaque, and whether (and when) it slides half off its edge when left alone.
+/// The native side owns them; a showing ball follows a write at once.
+class PhoneBallPrefs {
+  const PhoneBallPrefs({
+    this.sizeDp = defaultSizeDp,
+    this.opacity = defaultOpacity,
+    this.idleHide = true,
+    this.idleMs = defaultIdleMs,
+    this.showing = false,
+  });
+
+  factory PhoneBallPrefs.fromMap(Map<Object?, Object?> m) => PhoneBallPrefs(
+    sizeDp: clampSize(m['sizeDp'] is num ? (m['sizeDp'] as num).toInt() : defaultSizeDp),
+    opacity: clampOpacity(m['opacity'] is num ? (m['opacity'] as num).toDouble() : defaultOpacity),
+    idleHide: _flag(m['idleHide']),
+    idleMs: clampIdle(m['idleMs'] is num ? (m['idleMs'] as num).toInt() : defaultIdleMs),
+    showing: _flag(m['showing']),
+  );
+
+  /// 56 dp: the accessibility ball's size, and the capsule's height.
+  static const defaultSizeDp = 56;
+  static const minSizeDp = 40;
+  static const maxSizeDp = 72;
+
+  /// Solid by default: the mark reads on any page.
+  static const defaultOpacity = 1.0;
+  static const minOpacity = 0.6;
+  static const maxOpacity = 1.0;
+
+  /// 3 s: long enough not to hide while reading, short enough to be out of the way.
+  static const defaultIdleMs = 3000;
+  static const minIdleMs = 1000;
+  static const maxIdleMs = 10000;
+
+  final int sizeDp;
+
+  /// 0.6–1.
+  final double opacity;
+
+  /// 闲置后自动半隐.
+  final bool idleHide;
+  final int idleMs;
+
+  /// The ball is up now (read only: the switch opens and closes it).
+  final bool showing;
+
+  int get percent => (opacity * 100).round();
+  int get idleSeconds => (idleMs / 1000).round();
+
+  static int clampSize(int v) => v.clamp(minSizeDp, maxSizeDp).toInt();
+
+  static double clampOpacity(double v) =>
+      v.isNaN ? defaultOpacity : (v.clamp(minOpacity, maxOpacity) * 100).round() / 100;
+
+  /// Whole seconds, 1–10.
+  static int clampIdle(int v) => ((v.clamp(minIdleMs, maxIdleMs) + 500) ~/ 1000 * 1000).clamp(minIdleMs, maxIdleMs).toInt();
+
+  PhoneBallPrefs copyWith({int? sizeDp, double? opacity, bool? idleHide, int? idleMs, bool? showing}) => PhoneBallPrefs(
+    sizeDp: sizeDp == null ? this.sizeDp : clampSize(sizeDp),
+    opacity: opacity == null ? this.opacity : clampOpacity(opacity),
+    idleHide: idleHide ?? this.idleHide,
+    idleMs: idleMs == null ? this.idleMs : clampIdle(idleMs),
+    showing: showing ?? this.showing,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is PhoneBallPrefs &&
+      other.sizeDp == sizeDp &&
+      other.opacity == opacity &&
+      other.idleHide == idleHide &&
+      other.idleMs == idleMs;
+
+  @override
+  int get hashCode => Object.hash(sizeDp, opacity, idleHide, idleMs);
+}
+
 // ── Results ──────────────────────────────────────────────────────────────────
 
 /// Only explicit one-shot native choices may answer an engine approval.
@@ -1060,6 +1140,17 @@ class PhoneChannel {
   /// opens the system switch and answers `reasonCode: noOverlayPermission`.
   Future<PhoneResult> setVscreenOverlay(bool open) => _result('vscreenOverlay', {'open': open});
 
+  /// Opens or closes the 悬浮球. Without 显示在其他应用上层 nothing starts: the answer
+  /// carries `reasonCode: noOverlayPermission` and the caller says what to turn on.
+  Future<PhoneResult> setBallOverlay(bool open) => _result('ballOverlay', {'open': open});
+
+  /// The 悬浮球 settings; null without the native side.
+  Future<PhoneBallPrefs?> ballPrefs() => _ball('ballPrefs');
+
+  /// Writes what is given (the rest stays).
+  Future<PhoneResult> setBallPrefs({int? sizeDp, double? opacity, bool? idleHide, int? idleMs}) =>
+      _result('setBallPrefs', {'sizeDp': ?sizeDp, 'opacity': ?opacity, 'idleHide': ?idleHide, 'idleMs': ?idleMs});
+
   /// The caller gates these actions on the advertised versioned capabilities.
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) => _result('setBackgroundMode', {'mode': mode.name});
 
@@ -1183,6 +1274,17 @@ class PhoneChannel {
     try {
       final map = await _methods.invokeMapMethod<Object?, Object?>(method, args);
       return map == null ? null : PhoneOverlayPrefs.fromMap(map);
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<PhoneBallPrefs?> _ball(String method, [Object? args]) async {
+    try {
+      final map = await _methods.invokeMapMethod<Object?, Object?>(method, args);
+      return map == null ? null : PhoneBallPrefs.fromMap(map);
     } on MissingPluginException {
       return null;
     } on PlatformException {

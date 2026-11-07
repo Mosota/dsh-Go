@@ -54,6 +54,7 @@ import io.github.ccch1mneyyy.dsh_app.phone.a11y.dpf
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.softShadow
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl
 import java.util.concurrent.Executors
+import kotlin.math.abs
 import kotlin.math.min
 
 /**
@@ -136,6 +137,7 @@ class VscreenOverlayService : Service() {
 
     override fun onDestroy() {
         live = false
+        available = null
         main.removeCallbacks(tick)
         io.shutdownNow()
         root?.animate()?.cancel()
@@ -162,7 +164,11 @@ class VscreenOverlayService : Service() {
     private fun show() {
         val c = if (isDark()) OverlayPalette.DARK else OverlayPalette.LIGHT
         val metrics = resources.displayMetrics
-        wantedW = (min(metrics.widthPixels, metrics.heightPixels) * WIDTH_FRACTION).toInt()
+        // A window coming back (关闭 hid it) keeps the width and place it had; the first one is
+        // sized to the screen.
+        if (wantedW == 0) wantedW = (min(metrics.widthPixels, metrics.heightPixels) * WIDTH_FRACTION).toInt()
+        val wasAt = params?.let { it.x to it.y }
+        closing = false
 
         val bodyView = FrameLayout(this).apply {
             clipChildren = true
@@ -218,8 +224,8 @@ class VscreenOverlayService : Service() {
         params = p
         // Sizes first: the window is not attached yet, so this only fills in the params.
         layout(wantedW)
-        p.x = (metrics.widthPixels - cardW) / 2 - dp(PAD_X_DP)
-        p.y = (metrics.heightPixels * 0.18f).toInt() - dp(PAD_TOP_DP)
+        p.x = wasAt?.first ?: ((metrics.widthPixels - cardW) / 2 - dp(PAD_X_DP))
+        p.y = wasAt?.second ?: ((metrics.heightPixels * 0.18f).toInt() - dp(PAD_TOP_DP))
         try {
             windows.addView(frame, p)
             root = frame
@@ -256,7 +262,7 @@ class VscreenOverlayService : Service() {
         }, LinearLayout.LayoutParams(dp(KEY_DP), ViewGroup.LayoutParams.MATCH_PARENT))
         addView(GlyphKey(this@VscreenOverlayService, KeyGlyph.CLOSE, c).apply {
             contentDescription = "关闭悬浮窗"
-            setOnClickListener { dismiss { stopSelf() } }
+            setOnClickListener { dismiss { hideWindow() } }
         }, LinearLayout.LayoutParams(dp(KEY_DP), ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
@@ -352,6 +358,29 @@ class VscreenOverlayService : Service() {
             .withEndAction { then() }.start()
     }
 
+    /**
+     * 关闭: takes the picture away, but the service and its poll stay — the ball's 查看虚拟屏
+     * brings the window straight back, and a task that starts later appears by itself.
+     */
+    private fun hideWindow() {
+        val view = root
+        root = null
+        card = null
+        body = null
+        picture = null
+        hint = null
+        hintOn = true
+        shown?.recycle()
+        shown = null
+        frameWidth = 0
+        frameHeight = 0
+        closing = false
+        if (view != null) runCatching { windows.removeViewImmediate(view) }
+        main.removeCallbacks(tick)
+        main.post(tick)
+        VscreenBallService.ensure(this, true)
+    }
+
     private fun isDark(): Boolean =
         resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
 
@@ -386,18 +415,26 @@ class VscreenOverlayService : Service() {
     // ---- the corner grip: resizing from the bottom-right --------------------
 
     private var resizeStartX = 0f
+    private var resizeStartY = 0f
     private var resizeStartWidth = 0
 
     private val resizeTouch = View.OnTouchListener { _, event ->
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 resizeStartX = event.rawX
+                resizeStartY = event.rawY
                 resizeStartWidth = wantedW
                 true
             }
             MotionEvent.ACTION_MOVE -> {
-                // The window's top-left is the anchor: the corner follows the finger.
-                layout((resizeStartWidth + (event.rawX - resizeStartX)).toInt())
+                // The window's top-left is the anchor: the corner follows the finger. Both axes
+                // count — the height follows the width by the frame's shape, so pulling down is
+                // the same wish as pulling right, by that many width-pixels. The axis that moved
+                // further wins, which keeps growing and shrinking symmetric.
+                val byX = event.rawX - resizeStartX
+                val byY = (event.rawY - resizeStartY) / lastAspect.coerceIn(MIN_ASPECT, MAX_ASPECT)
+                val d = if (abs(byX) >= abs(byY)) byX else byY
+                layout((resizeStartWidth + d).toInt())
                 true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
@@ -516,6 +553,7 @@ class VscreenOverlayService : Service() {
         if (w > 0 && h > 0) lastAspect = h.toFloat() / w
         val previous = shown
         shown = decoded
+        available = true
         picture?.setImageBitmap(decoded)
         showPicture()
         fadeHint(false)
@@ -529,6 +567,7 @@ class VscreenOverlayService : Service() {
      */
     private fun noTarget() {
         // Touch forwarding must not aim at a size this window no longer shows.
+        available = false
         frameWidth = 0
         frameHeight = 0
         fadeHint(true)
@@ -637,6 +676,14 @@ class VscreenOverlayService : Service() {
 
         /** `reasonCode` of opening the overlay without 显示在其他应用上层. */
         const val NO_PERMISSION = "noOverlayPermission"
+
+        /**
+         * Whether the window's last poll found a 虚拟屏: the ball's 查看虚拟屏 row says 虚拟屏未运行
+         * without a channel round-trip. Null while the window isn't running (nothing is polling).
+         */
+        @Volatile
+        var available: Boolean? = null
+            private set
 
         /**
          * Opens or closes the window. Without [Settings.canDrawOverlays] it opens the system

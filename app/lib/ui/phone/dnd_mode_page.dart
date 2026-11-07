@@ -8,6 +8,7 @@ import '../../state/phone_state.dart';
 import '../common/list_page_row.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
+import 'ball_settings_page.dart';
 import 'phone_widgets.dart';
 import 'privileged_channel_page.dart';
 
@@ -102,6 +103,14 @@ class PhoneDndPage extends ConsumerWidget {
               trailing: Switch(
                 value: overlay,
                 onChanged: (v) => unawaited(_toggleVscreenOverlay(context, ref, v)),
+              ),
+            ),
+            ListPageRow(
+              icon: AppIcons.overlayBall,
+              title: '悬浮球',
+              subtitle: '浮在任意界面上的小球：大小、不透明度、闲置半隐',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const PhoneBallSettingsPage()),
               ),
             ),
           ],

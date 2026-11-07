@@ -8,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.OverlayPrefs
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenBallPrefs
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenBallService
 import io.github.ccch1mneyyy.dsh_app.phone.background.PrivilegedActionGate
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -166,6 +168,13 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                 else control.vscreenSwipe(x1, y1, x2, y2, call.argument<Int>("durationMs") ?: 300)
             }
             "vscreenOverlay" -> result.success(control.vscreenOverlay(call.argument<Boolean>("open") == true))
+            // 悬浮球: the ball's own on/off and its looks.
+            "ballOverlay" -> result.success(control.ballOverlay(call.argument<Boolean>("open") == true))
+            "ballPrefs" -> result.success(VscreenBallPrefs.read(appContext).toMap(VscreenBallService.showing))
+            "setBallPrefs" -> {
+                VscreenBallPrefs.write(appContext, call.arguments as? Map<*, *>)
+                result.success(mapOf("ok" to true))
+            }
             "setBackgroundMode" -> {
                 val mode = call.argument<String>("mode") ?: "off"
                 val live = stillWanted(privilegedActions.select())

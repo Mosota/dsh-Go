@@ -222,6 +222,28 @@ class PhoneController extends Notifier<PhoneState> {
     return result;
   }
 
+  /// 悬浮球: the floating ball over other apps. A refusal carries the reason (no
+  /// 显示在其他应用上层 comes back as `noOverlayPermission`).
+  Future<PhoneResult> openBallOverlay() async {
+    final result = await _channel.setBallOverlay(true);
+    if (ref.mounted) ref.read(vscreenBallProvider.notifier).update(result.ok);
+    return result;
+  }
+
+  Future<PhoneResult> closeBallOverlay() async {
+    final result = await _channel.setBallOverlay(false);
+    if (ref.mounted) ref.read(vscreenBallProvider.notifier).update(false);
+    return result;
+  }
+
+  /// The ball's size, opacity and idle half-hide, from the native side.
+  Future<PhoneBallPrefs?> ballPrefs() => _channel.ballPrefs();
+
+  /// Writes the ball's settings (the rest stays).
+  Future<PhoneResult> setBallPrefs({int? sizeDp, double? opacity, bool? idleHide, int? idleMs}) => _thenRefresh(
+    _channel.setBallPrefs(sizeDp: sizeDp, opacity: opacity, idleHide: idleHide, idleMs: idleMs),
+  );
+
   /// #153: independent switch for the model's `shell`/`device` tools.
   Future<bool> setShellAllowed(bool allowed) => _thenRefresh(_channel.setShellAllowed(allowed));
 
@@ -382,6 +404,16 @@ class VscreenOverlayOn extends Notifier<bool> {
 }
 
 final vscreenOverlayProvider = NotifierProvider<VscreenOverlayOn, bool>(VscreenOverlayOn.new);
+
+/// 悬浮球: whether the ball is up. Runtime-only — the system may stop the service on its own.
+class VscreenBallOn extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void update(bool value) => state = value;
+}
+
+final vscreenBallProvider = NotifierProvider<VscreenBallOn, bool>(VscreenBallOn.new);
 
 /// Why phone control can't work right now; null when nothing stands in the way.
 enum PhoneBlocker {

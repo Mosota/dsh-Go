@@ -314,6 +314,17 @@
                 android:value="Shows the virtual screen in a floating window over other apps" />
         </service>
 
+        <!-- 悬浮球 (phone/overlay/VscreenBallService.kt): the ball that opens the virtual screen and
+             its settings while the picture window is closed. Off until the person turns it on. -->
+        <service
+            android:name=".phone.overlay.VscreenBallService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating ball for the virtual screen overlay" />
+        </service>
+
         <!-- Chat artifacts: hands one file at a time to the app that opens it (files/FilesPlugin.kt). -->
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -66,6 +66,7 @@ enum SettingsPageId {
   phone,
   phoneAppRules,
   phoneDnd,
+  phoneBall,
   phoneUnlocks,
   webSearch,
   media,
@@ -356,6 +357,15 @@ final _pages = <SettingsPageMeta>[
     title: (l) => l.phoneDndTitle,
     parent: SettingsPageId.phone,
     keywords: (l) => l.searchKwDnd,
+    // The 悬浮球's 「虚拟屏设置」 row opens it through this link.
+    links: const ['vscreen'],
+    condition: SpotCondition.phoneControlOn,
+  ),
+  SettingsPageMeta(
+    SettingsPageId.phoneBall,
+    title: (l) => '悬浮球',
+    parent: SettingsPageId.phoneDnd,
+    links: const ['ball'],
     condition: SpotCondition.phoneControlOn,
   ),
   SettingsPageMeta(
