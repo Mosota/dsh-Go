@@ -242,7 +242,14 @@ class RuntimeController private constructor(private val app: Context) : DshProce
             return onDone(null)
         }
         if (process != null || resetting || phase in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING)) {
-            return onDone(RuntimeUpgradeBlocked("running"))
+            // A new APK ships a new runtime. Refusing to upgrade while the old engine runs left the
+            // app stuck on "install failed: runtime_upgrade_blocked:running" after every update, so
+            // the engine is stopped here and the install continues.
+            log("[dsh-app] stopping the engine to install ${manifest.runtimeVersion}", "system")
+            val stopped = runCatching { stopProcess() }.getOrDefault(false)
+            val deadline = System.currentTimeMillis() + 6_000
+            while (process != null && System.currentTimeMillis() < deadline) Thread.sleep(100)
+            if (process != null || (!stopped && resetting)) return onDone(RuntimeUpgradeBlocked("running"))
         }
         setPhase(Phase.INSTALLING)
         worker.execute {
