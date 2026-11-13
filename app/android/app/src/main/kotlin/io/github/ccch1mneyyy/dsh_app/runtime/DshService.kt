@@ -48,7 +48,8 @@ class DshService : Service() {
         super.onCreate()
         live = this
         // 息屏保活: hold the CPU from the moment the service exists, not only after a start command.
-        acquireWakeLock()
+        live = this
+        if (busy) acquireWakeLock() else releaseWakeLock()
         PowerSaver.refresh(this)
         KeepAliveGuard.startAsync(this, isRunning)
         // The channel may come up after this service: retry quietly once a minute.
@@ -149,6 +150,7 @@ class DshService : Service() {
         keepAliveHandler.removeCallbacks(keepAliveTick)
         running = false
         // Deliberately not stopping the shell watchdog: outliving this service is its job.
+        live = null
         KeepAliveGuard.onServiceDestroy()
         installSink?.let { RuntimeController.get(this).removeSink(it) }
         installSink = null
@@ -226,12 +228,37 @@ class DshService : Service() {
         }
     }
 
+    /**
+     * 空闲时放锁: the wake lock is held only while a phone/agent task is running. Idle time is
+     * covered by the shell-uid watchdog, which keeps ticking even when this app is frozen.
+     */
+    private fun releaseWakeLock() {
+        runCatching { wakeLock?.let { if (it.isHeld) it.release() } }
+        wakeLock = null
+    }
+
     private fun stopForegroundCompat() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
         else @Suppress("DEPRECATION") stopForeground(true)
     }
 
     companion object {
+        /** The running service, if any, so task activity can drive the wake lock. */
+        @Volatile
+        private var live: DshService? = null
+
+        @Volatile
+        private var busy = false
+
+        /** Called by the phone layer whenever a task starts or ends. */
+        fun setBusy(service: DshService?, value: Boolean) {
+            busy = value
+            val svc = service ?: live ?: return
+            svc.keepAliveHandler.post {
+                if (value) svc.acquireWakeLock() else svc.releaseWakeLock()
+            }
+        }
+
         const val ACTION_INSTALL = "io.github.ccch1mneyyy.dsh_app.INSTALL"
         const val ACTION_INSTALL_DONE = "io.github.ccch1mneyyy.dsh_app.INSTALL_DONE"
         const val ACTION_START = "io.github.ccch1mneyyy.dsh_app.START"

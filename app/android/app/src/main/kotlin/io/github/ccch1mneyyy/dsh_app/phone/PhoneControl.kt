@@ -904,6 +904,9 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     /** Called only on ticker: complete sampling and revision assignment cannot interleave. */
     private fun captureStatus(): Map<String, Any?> {
+        // 任务在跑才持锁: the phone layer knows when a task starts and ends, so it drives the
+        // runtime's wake lock instead of leaving it held through hours of idle time.
+        runCatching { DshService.setBusy(null, tasks.snapshot().active) }
         val value = linkedMapOf<String, Any?>(
             "enabled" to isEnabled(),
             "shellAllowed" to shellAllowed(),
