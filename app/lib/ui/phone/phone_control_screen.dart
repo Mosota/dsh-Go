@@ -786,7 +786,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
               ),
             ),
           ),
-          if (state.background.ready)
+          if (state.status.background.ready)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Text(
@@ -796,30 +796,6 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
                 ),
               ),
             ),
-        ],
-      ),
-      const SizedBox(height: 24),
-      ListPageCard(
-        title: context.l10n.phoneControlRecentActions,
-        children: [
-          if (recent.isEmpty)
-            ListPageRow(
-              icon: AppIcons.history,
-              iconColor: DshColors.of(context).textTertiary,
-              title: context.l10n.phoneActionLogEmpty,
-              subtitle: context.l10n.phoneControlRecentActionsHint,
-            )
-          else ...[
-            for (final e in recent) ActionLogRow(e),
-            ListPageRow(
-              // Empty glyph slot: the words line up with the titles above.
-              leading: const SizedBox.shrink(),
-              title: context.l10n.phoneControlAllActions,
-              titleStyle: Theme.of(context).textTheme.bodyLarge
-                  ?.copyWith(fontSize: 15, height: 1.4, color: Theme.of(context).colorScheme.primary),
-              onTap: () => _push(const PhoneActionLogPage()),
-            ),
-          ],
         ],
       ),
     ];
