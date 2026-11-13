@@ -60,6 +60,7 @@ import io.github.ccch1mneyyy.dsh_app.phone.a11y.dp
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.dpf
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.softShadow
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl
+import io.github.ccch1mneyyy.dsh_app.runtime.PowerSaver
 import java.util.Arrays
 import java.util.concurrent.Executors
 import kotlin.math.min
