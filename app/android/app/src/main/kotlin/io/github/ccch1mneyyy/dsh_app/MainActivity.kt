@@ -116,6 +116,8 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl.get(applicationContext).restoreKeptChannel()
+        // 息屏保活: the app is alive again; rebuild the watchdog if the system or a ROM update lost it.
+        io.github.ccch1mneyyy.dsh_app.runtime.KeepAliveGuard.startAsync(applicationContext, io.github.ccch1mneyyy.dsh_app.runtime.DshService.isRunning)
         inForeground = true
         // Coming back counts as activity: the first frames may not be scheduled yet.
         framesActive = true

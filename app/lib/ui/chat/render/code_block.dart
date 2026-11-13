@@ -392,7 +392,7 @@ class _CodeBlockState extends State<CodeBlock> {
   bool _copied = false;
 
   /// 长行折回显示,而不是横向滚动。
-  bool _wrap = false;
+  bool _wrap = true;
 
   /// While code streams in, it is highlighted again at most this often (the
   /// last chunk of up to 8000 characters, every delta, was the cost); what

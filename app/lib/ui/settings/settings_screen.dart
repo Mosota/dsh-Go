@@ -36,6 +36,7 @@ import '../features/feature_format.dart' show permissionName;
 import '../features/permission_page.dart';
 import '../onboarding/api_key_page.dart' show maskApiKey;
 import '../pets/pet_settings_page.dart';
+import '../phone/phone_extra_page.dart';
 import '../phone/phone_control_screen.dart';
 import '../plugins/plugins_screen.dart';
 import '../plugins/seats/plugin_settings_tiles.dart';
@@ -50,6 +51,7 @@ import '../theme/theme.dart';
 import '../update/update_tiles.dart' show UpdateBadge;
 import 'about_page.dart';
 import 'appearance/appearance_page.dart';
+import 'backup_page.dart';
 import 'background_guide_page.dart';
 import 'diagnostics_page.dart';
 import 'interface_page.dart';
@@ -174,6 +176,12 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => _push(context, const PhoneControlScreen()),
             ),
             SettingsTile(
+              icon: AppIcons.systemAccess,
+              tint: SettingsHues.abilities,
+              title: '操控通道与工具',
+              onTap: () => _push(context, const PhoneExtraPage()),
+            ),
+            SettingsTile(
               icon: AppIcons.webSearch,
               tint: SettingsHues.abilities,
               spot: SettingsIndex.entry(SettingsPageId.webSearch),
@@ -259,6 +267,12 @@ class SettingsScreen extends ConsumerWidget {
               tint: SettingsHues.general,
               spot: SettingsIndex.entry(SettingsPageId.privacy),
               onTap: () => _push(context, const PrivacyPage()),
+            ),
+            SettingsTile(
+              icon: AppIcons.files,
+              tint: SettingsHues.general,
+              title: '备份与恢复',
+              onTap: () => _push(context, const BackupPage()),
             ),
           ],
         ),

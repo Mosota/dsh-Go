@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../performance/performance_state.dart';
+import '../../state/keep_alive_prefs.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import 'settings_widgets.dart';
@@ -39,6 +40,7 @@ class PerformancePage extends ConsumerWidget {
     final prefs = ref.watch(performancePrefsProvider);
     final defaults = ref.watch(performanceDefaultsProvider);
     final thermal = ref.watch(performanceProvider.select((s) => s.thermalLightweight));
+    final keep = ref.watch(keepAlivePrefsProvider);
     final notifier = ref.read(performancePrefsProvider.notifier);
     return AppPage.list(
       title: l10n.performanceTitle,
@@ -80,6 +82,18 @@ class PerformancePage extends ConsumerWidget {
               ],
               selected: prefs.refreshRate,
               onChanged: (mode) => unawaited(notifier.setRefreshRate(mode)),
+            ),
+          ],
+        ),
+        SettingsSection(
+          title: '省电',
+          children: [
+            SettingsSwitchTile(
+              key: const ValueKey('global-power-saver'),
+              title: '全局省电',
+              subtitle: '空闲时暂停预览、降低日志写入；任务运行与动效设置不受影响',
+              value: keep.globalPowerSaver,
+              onChanged: (v) => unawaited(ref.read(keepAlivePrefsProvider.notifier).setGlobalPowerSaver(v)),
             ),
           ],
         ),

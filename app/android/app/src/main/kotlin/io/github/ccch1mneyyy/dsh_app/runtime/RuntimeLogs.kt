@@ -20,6 +20,9 @@ class RuntimeLogs(
         Thread(it, "dsh-logs").apply { isDaemon = true }
     },
 ) {
+    /** Coarse levels: 全局省电 keeps WARN, drops DEBUG/INFO (RuntimeLogs has no finer levels). */
+    enum class Level { DEBUG, INFO, WARN }
+
     data class Entry(val seq: Long, val line: String, val stream: String, internal val warning: Boolean = false) {
         internal val bytes = (line + "\n").toByteArray(Charsets.UTF_8)
         fun toMap(): Map<String, Any?> = mapOf("seq" to seq, "line" to line, "stream" to stream)
@@ -55,6 +58,9 @@ class RuntimeLogs(
         fun takeAll(): List<Entry> = entries.toList().also { entries.clear(); bytes = 0 }
     }
 
+    /** 全局省电: only warnings keep being written and delivered. */
+    @Volatile var quiet: Boolean = false
+
     private val guard = Object()
     private val ring = ArrayDeque<Entry>()
     private val disk = Pending()
@@ -69,7 +75,8 @@ class RuntimeLogs(
     private val flushes = mutableListOf<Pair<Long, CompletableFuture<Unit>>>()
 
     /** Live entries retain the token-only mask; only the disk copy uses full diagnostics rules. */
-    fun accept(line: String, stream: String, storageLine: String = line) {
+    fun accept(line: String, stream: String, storageLine: String = line, level: Level = Level.INFO) {
+        if (quiet && level != Level.WARN) return
         val liveLine = CrashClassifier.redact(line)
         val diskLine = LogRedactor.redact(storageLine)
         synchronized(guard) {

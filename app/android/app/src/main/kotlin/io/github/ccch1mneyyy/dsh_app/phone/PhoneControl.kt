@@ -28,14 +28,17 @@ import io.github.ccch1mneyyy.dsh_app.phone.a11y.PhoneA11yService
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundControl
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundPreview
 import io.github.ccch1mneyyy.dsh_app.phone.background.SecureSettingsGrant
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenBallService
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenOverlayService
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillBridge
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillDrafts
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillLifecycle
+import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillOutcomes
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplayApps
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplaySelections
-import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillOutcomes
-import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillDrafts
-import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillBridge
-import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillLifecycle
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneTaskTrace
 import io.github.ccch1mneyyy.dsh_app.runtime.RuntimeController
+import io.github.ccch1mneyyy.dsh_app.runtime.KeepAliveGuard
 import io.github.ccch1mneyyy.dsh_app.runtime.DshService
 import io.github.ccch1mneyyy.dsh_app.shortcuts.EntryActivity
 import java.io.File
@@ -348,7 +351,15 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         PhoneRegistry.controlListener = this
         PhoneRegistry.unlocks = { policies().unlocks }
         // Never enter registry from a BackgroundControl callback's ownership monitor.
-        background.onStatusChanged = { ticker.execute { sessions.backgroundCapacityChanged() } }
+        background.onStatusChanged = {
+            ticker.execute {
+                sessions.backgroundCapacityChanged()
+                // The channel and 手机操控 are separate switches: keep-alive follows the channel.
+                KeepAliveGuard.onChannelChanged(app)
+                // A task may have started: resume a 虚拟屏 preview paused by 全局省电.
+                VscreenOverlayService.wake(app)
+            }
+        }
         background.onPreviewChanged = { main.post { preview.refresh() } }
         background.localOcrAllowed = { target ->
             isEnabled() && !isLocked() && target.packageName != app.packageName &&
@@ -365,6 +376,51 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     // ── Switch and app lists ────────────────────────────────────────────────────────
 
     fun isEnabled(): Boolean = switchedOn(app)
+
+    /** #153: whether the model may use the `shell`/`device` tools (independent of 不打扰模式). */
+    fun shellAllowed(): Boolean = prefs.getBoolean(K_SHELL, false)
+
+    /** Dangerous commands are refused unless the person turned the guard off. */
+    override fun shellGuard(): Boolean = prefs.getBoolean(K_SHELL_GUARD, true)
+
+    fun setShellGuard(guard: Boolean): Boolean {
+        prefs.edit().putBoolean(K_SHELL_GUARD, guard).apply()
+        emitStatus()
+        return true
+    }
+
+
+    /** Per-category switches under 拦截危险命令; all default on. */
+    override fun shellGuardCategory(kind: String): Boolean = prefs.getBoolean(
+        when (kind) {
+            "uninstall" -> K_GUARD_UNINSTALL
+            "security" -> K_GUARD_SECURITY
+            "files" -> K_GUARD_FILES
+            "power" -> K_GUARD_POWER
+            else -> return true
+        },
+        true,
+    )
+
+    fun setShellGuardCategory(kind: String, allowed: Boolean): Boolean {
+        val key = when (kind) {
+            "uninstall" -> K_GUARD_UNINSTALL
+            "security" -> K_GUARD_SECURITY
+            "files" -> K_GUARD_FILES
+            "power" -> K_GUARD_POWER
+            else -> return false
+        }
+        prefs.edit().putBoolean(key, allowed).apply()
+        emitStatus()
+        return true
+    }
+
+
+    fun setShellAllowed(allowed: Boolean): Boolean {
+        prefs.edit().putBoolean(K_SHELL, allowed).apply()
+        emitStatus()
+        return true
+    }
 
     /** Off closes the bridge and stops the task after any in-flight keeper settings write.
      * On needs an engine restart (the UI does it); the rebind gap never holds this switch.
@@ -713,6 +769,28 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     fun appDetailsIntent(): Intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.packageName}"))
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
+    // ── 悬浮窗查看虚拟屏 ─────────────────────────────────────────────────────────────
+    // These are the overlay's own calls (and the app's): they read the display a task already
+    // runs, through the read-only preview owner, so they never take or release it.
+
+    /** One frame of the running 虚拟屏; `png` is the engine's captured image, base64'd. */
+    fun vscreenFrame(): Map<String, Any?> = background.frame()
+
+    /** Whether there is a display to preview, and its pixel size. */
+    fun vscreenState(): Map<String, Any?> = background.vscreenState()
+
+    /** A tap at the virtual screen's own pixels. */
+    fun vscreenTap(x: Int, y: Int): Map<String, Any?> = background.vscreenTap(x, y)
+
+    fun vscreenSwipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Map<String, Any?> =
+        background.vscreenSwipe(x1, y1, x2, y2, durationMs)
+
+    /** 悬浮窗查看虚拟屏: opens or closes the floating window (needs 显示在其他应用上层). */
+    fun vscreenOverlay(open: Boolean): Map<String, Any?> = VscreenOverlayService.ensure(app, open)
+
+    /** 悬浮球: opens or closes the floating ball (needs 显示在其他应用上层). */
+    fun ballOverlay(open: Boolean): Map<String, Any?> = VscreenBallService.ensure(app, open)
+
     /** Debug probe only. The worker builds values; only the successful caller may persist them. */
     internal fun collectNavigationMaterial(driver: io.github.ccch1mneyyy.dsh_app.phone.a11y.MainScreenDriver,
                                           seq: Int, publish: (ByteArray) -> Unit) {
@@ -828,6 +906,14 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     private fun captureStatus(): Map<String, Any?> {
         val value = linkedMapOf<String, Any?>(
             "enabled" to isEnabled(),
+            "shellAllowed" to shellAllowed(),
+            "shellGuard" to shellGuard(),
+            "shellGuardCategories" to linkedMapOf(
+                "uninstall" to shellGuardCategory("uninstall"),
+                "security" to shellGuardCategory("security"),
+                "files" to shellGuardCategory("files"),
+                "power" to shellGuardCategory("power"),
+            ),
             "skills" to skillsStatus(),
             "bridgeListening" to bridge.listening,
             "a11y" to linkedMapOf("enabled" to a11yEnabledInSettings(), "serviceConnected" to (PhoneRegistry.mainDriver != null)),
@@ -1036,6 +1122,34 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     override fun system(): SystemApi = system
 
+    /**
+     * #153: the `shell`/`device` tools ride the 不打扰模式 channel (the only place a shell uid
+     * exists), but are gated by their own switch so opening phone control does not silently hand
+     * the model a shell. Returning null keeps the tool's answer honest.
+     */
+    override fun privilegedExec(cmd: String, timeoutMs: Int?, cwd: String?): Map<String, Any?>? {
+        if (!shellAllowed()) return null
+        if (privilegedChannelOff()) return null
+        return background.exec(cmd, timeoutMs, cwd)
+    }
+
+    override fun privilegedDump(): Map<String, Any?>? {
+        if (!shellAllowed()) return null
+        if (privilegedChannelOff()) return null
+        return background.deviceDump()
+    }
+
+    /**
+     * The transport is off. Reads the real mode: the legacy `mode` field reports a root channel as
+     * `off`, and `shell` runs fine over root.
+     */
+    private fun privilegedChannelOff(): Boolean {
+        val status = background.status()
+        val mode = (status["privileged"] as? Map<*, *>)?.get("mode") as? String ?: status["mode"]
+        return mode == "off"
+    }
+
+
     override fun androidShell(): PhoneShellExecutor = PhoneShellExecutor { ownerId, command, timeoutMs, live, confirm ->
         shell.execute(ownerId, command, timeoutMs, live, confirm)
     }
@@ -1070,6 +1184,12 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         internal val keeperSwitchLock = Any()
         private const val K_POLICIES = "policies"
         private const val K_TCP_FALLBACK = "tcpFallback"
+        private const val K_SHELL = "modelShell"
+        private const val K_SHELL_GUARD = "shellGuard"
+        private const val K_GUARD_UNINSTALL = "shellGuard_uninstall"
+        private const val K_GUARD_SECURITY = "shellGuard_security"
+        private const val K_GUARD_FILES = "shellGuard_files"
+        private const val K_GUARD_POWER = "shellGuard_power"
         private const val CHANNEL_FIX = "dsh-phone-fix"
         private const val NOTIFY_FIX_ID = 4099
 

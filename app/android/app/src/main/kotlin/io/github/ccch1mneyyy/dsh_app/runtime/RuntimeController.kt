@@ -49,6 +49,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     )
     private val lkgFile = File(app.filesDir, "runtime/lkg/lkg.json")
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    init { PowerSaver.refresh(app) }
     private val workspaceRecovery = WorkspaceRecoveryMode(prefs.getBoolean(K_WORKSPACE_RECOVERY, false))
 
     val manifest: RuntimeManifest by lazy { RuntimeManifest.load(app) }
@@ -1131,7 +1132,14 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         }
     }
 
-    private fun log(line: String, stream: String, storageLine: String = line) = runtimeLogs.accept(line, stream, storageLine)
+    private fun log(line: String, stream: String, storageLine: String = line) {
+        // 全局省电: routine lifecycle lines are DEBUG; failures / the ready line stay visible.
+        val important = listOf("fail", "error", "exited", "listening", "safe mode", "killed")
+            .any { line.contains(it, ignoreCase = true) }
+        runtimeLogs.quiet = PowerSaver.enabled
+        runtimeLogs.accept(line, stream, storageLine,
+            if (important) RuntimeLogs.Level.WARN else RuntimeLogs.Level.INFO)
+    }
 
     private fun setPhase(next: Phase) {
         if (next != Phase.RUNNING) managedSkillGate.retire()

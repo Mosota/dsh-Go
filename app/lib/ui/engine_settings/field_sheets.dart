@@ -282,11 +282,27 @@ String _typedText(num? stored, FieldUnit unit) {
 
 class _NumberFieldSheetState extends State<NumberFieldSheet> with _AcknowledgedSheet<NumberFieldSheet> {
   late final _controller = TextEditingController(text: _typedText(widget.current ?? widget.inherited, widget.unit));
+  late final _focus = FocusNode()..addListener(_onFocus);
 
   @override
   void dispose() {
+    _focus.removeListener(_onFocus);
+    _focus.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Leaving the field (or 完成) clamps what was typed: a value outside min/max is
+  /// brought back to the nearest bound instead of being refused.
+  void _onFocus() {
+    if (!_focus.hasFocus) _normalize();
+  }
+
+  void _normalize() {
+    final stored = _stored;
+    if (stored == null || !stored.isFinite) return;
+    final clamped = _clampStored(stored);
+    if (clamped != stored) _setStored(clamped);
   }
 
   num? get _min => meaningfulMin(widget.meta);
@@ -295,6 +311,14 @@ class _NumberFieldSheetState extends State<NumberFieldSheet> with _AcknowledgedS
   num? get _stored {
     final typed = num.tryParse(_controller.text.trim());
     return typed == null ? null : fromEditValue(typed, widget.unit);
+  }
+
+  /// The nearest value inside the field's min/max (bounds are in stored units).
+  num _clampStored(num stored) {
+    var value = stored;
+    if (_min case final min? when value < min) value = min;
+    if (_max case final max? when value > max) value = max;
+    return value;
   }
 
   void _setStored(num stored) {
@@ -349,12 +373,19 @@ class _NumberFieldSheetState extends State<NumberFieldSheet> with _AcknowledgedS
       }
       return;
     }
-    final error = validateNumber(text, widget.meta, widget.unit);
+    final parsed = _stored;
+    if (parsed == null || !parsed.isFinite) {
+      setState(() => _error = context.l10n.engineFieldEnterNumeric);
+      return;
+    }
+    // min/max are a hard range: clamp typed values instead of refusing them.
+    final stored = _clampStored(parsed);
+    if (stored != parsed) _setStored(stored);
+    final error = validateNumber(_typedText(stored, widget.unit), widget.meta, widget.unit);
     if (error != null) {
       setState(() => _error = error);
       return;
     }
-    final stored = _stored!;
     if (stored == (widget.current ?? widget.inherited)) {
       Navigator.of(context).pop();
     } else {
@@ -428,19 +459,42 @@ class _NumberFieldSheetState extends State<NumberFieldSheet> with _AcknowledgedS
                             key: const ValueKey('number-input'),
                             enabled: !_busy,
                             controller: _controller,
+                            focusNode: _focus,
                             textAlign: TextAlign.center,
                             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[-+0-9.eE]'))],
+                            // 非数字 / 第二个小数点 / 重复指数直接忽略，而不是写进草稿再报错。
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'[0-9eE+\-.]')),
+                              TextInputFormatter.withFunction(
+                                (oldValue, newValue) => newValue.text.isEmpty ||
+                                        RegExp(r'^[-+]?(\d+\.?\d*|\.\d*)?([eE][-+]?\d*)?$').hasMatch(newValue.text)
+                                    ? newValue
+                                    : oldValue,
+                              ),
+                            ],
                             style: valueStyle,
+                            // 改输入框立即刷新滑杆与 +/- 的可按状态；两者读同一个 _stored。
                             onChanged: (_) => setState(() => _error = null),
                             onSubmitted: (_) => _submit(),
-                            decoration: const InputDecoration(
-                              isCollapsed: true,
-                              filled: false,
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(vertical: 8),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              hintText: '输入数值',
+                              hintStyle: theme.textTheme.bodyMedium?.copyWith(color: colors.textTertiary),
+                              filled: true,
+                              fillColor: scheme.surface.withValues(alpha: 0.6),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: scheme.outlineVariant),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: scheme.outlineVariant),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: scheme.primary),
+                              ),
                             ),
                           ),
                         ),

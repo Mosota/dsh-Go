@@ -16,8 +16,11 @@ import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillBridge
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplaySelections
 import io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneSkillReplayApps
 import io.github.ccch1mneyyy.dsh_app.runtime.RuntimeController
+import io.github.ccch1mneyyy.dsh_app.runtime.KeepAliveGuard
 import io.github.ccch1mneyyy.dsh_app.runtime.PhoneSkillBundleReader
 import io.github.ccch1mneyyy.dsh_app.phone.a11y.OverlayPrefs
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenBallPrefs
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenBallService
 import io.github.ccch1mneyyy.dsh_app.phone.background.PrivilegedActionGate
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -27,6 +30,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import java.util.concurrent.Executors
+import io.github.ccch1mneyyy.dsh_app.phone.overlay.VscreenOverlayService
 
 /**
  * Flutter bridge for phone control: MethodChannel `dsh/phone`, EventChannel `dsh/phone/events`.
@@ -188,6 +192,20 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            dispatch(call, result)
+        } catch (e: Throwable) {
+            android.util.Log.w("DshPhone", "phone method ${call.method} failed", e)
+            result.success(
+                mapOf(
+                    "ok" to false,
+                    "reason" to "${call.method}: ${e.javaClass.simpleName}: ${e.message ?: "no message"}",
+                ),
+            )
+        }
+    }
+
+    private fun dispatch(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "status" -> control.status { complete(result, it) }
             "androidShellStatus" -> async(result, shortControl = true) { control.shell.status() }
@@ -290,6 +308,47 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
             "openAccessibilitySettings" -> result.success(startActivity(control.accessibilitySettingsIntent()))
             "openAppDetails" -> result.success(startActivity(control.appDetailsIntent()))
             "testScreen" -> async(result) { control.testScreen() }
+            "setShellAllowed" -> async(result) { control.setShellAllowed(call.argument<Boolean>("allowed") == true) }
+            "shellAllowed" -> result.success(control.shellAllowed())
+            "setShellGuard" -> async(result) { control.setShellGuard(call.argument<Boolean>("guard") == true) }
+            "setShellGuardCategory" -> async(result) {
+                val kind = call.argument<String>("kind").orEmpty()
+                control.setShellGuardCategory(kind, call.argument<Boolean>("allowed") == true)
+            }
+            "setVdisplayEnabled" -> async(result) { control.background.setVdisplayEnabled(call.argument<Boolean>("enabled") == true) }
+            // 悬浮窗查看虚拟屏: the overlay's frames and touches, plus its own on/off.
+            "vscreenFrame" -> async(result) { control.vscreenFrame() }
+            "vscreenState" -> async(result) {
+                // `showing` is the window's own state: the switch reads off after ✕ even when the
+                // app never asked.
+                control.vscreenState() + mapOf("showing" to VscreenOverlayService.showing)
+            }
+            "vscreenTap" -> async(result) {
+                val x = call.argument<Int>("x") ?: -1
+                val y = call.argument<Int>("y") ?: -1
+                if (x < 0 || y < 0) invalidVscreenPoint() else control.vscreenTap(x, y)
+            }
+            "vscreenSwipe" -> async(result) {
+                val x1 = call.argument<Int>("x1") ?: -1
+                val y1 = call.argument<Int>("y1") ?: -1
+                val x2 = call.argument<Int>("x2") ?: -1
+                val y2 = call.argument<Int>("y2") ?: -1
+                if (x1 < 0 || y1 < 0 || x2 < 0 || y2 < 0) invalidVscreenPoint()
+                else control.vscreenSwipe(x1, y1, x2, y2, call.argument<Int>("durationMs") ?: 300)
+            }
+            "vscreenOverlay" -> result.success(control.vscreenOverlay(call.argument<Boolean>("open") == true))
+            // 悬浮球: the ball's own on/off and its looks.
+            "ballOverlay" -> result.success(control.ballOverlay(call.argument<Boolean>("open") == true))
+            "ballPrefs" -> result.success(VscreenBallPrefs.read(appContext).toMap(VscreenBallService.showing))
+            "setBallPrefs" -> {
+                VscreenBallPrefs.write(appContext, call.arguments as? Map<*, *>)
+                result.success(mapOf("ok" to true))
+            }
+            // 息屏保活: three switches, stored natively so the service and watchdog see them.
+            "keepAlivePrefs" -> result.success(KeepAliveGuard.prefs(appContext))
+            "setKeepAlivePrefs" -> async(result) {
+                KeepAliveGuard.writePrefs(appContext, call.arguments as? Map<*, *> ?: emptyMap<Any?, Any?>())
+            }
             "setBackgroundMode" -> {
                 val mode = call.argument<String>("mode") ?: "off"
                 control.selfCheck.stop()
@@ -512,6 +571,10 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
 
     private fun cancelledSelection(): Map<String, Any?> =
         mapOf("ok" to false, "reason" to AppStrings.get(appContext, R.string.background_selection_cancelled))
+
+    /** A tap/swipe without usable (non-negative) virtual-screen pixels. */
+    private fun invalidVscreenPoint(): Map<String, Any?> =
+        mapOf("ok" to false, "reasonCode" to "invalidArguments", "reason" to "参数无效")
 
     /** Whether the UI action that took [ticket] still counts when the worker reaches it. */
     private fun stillWanted(ticket: Long): () -> Boolean = { attached && privilegedActions.current(ticket) }

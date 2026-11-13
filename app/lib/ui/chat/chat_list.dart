@@ -590,6 +590,9 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
         if (turn.running || !_runningTurns.contains(turn.startSeq) || !(turn.endReason?.isCompleted ?? false)) {
           continue;
         }
+        // 运行中它就已经收成一行了(主键相同),结束这一刻它本来就在屏幕上:
+        // 再播一遍「先展开、再收起」的交接动画,刚藏起来的过程会闪一下。
+        if (_index.containsKey('tp${turn.startSeq}')) continue;
         // 贴底看着的一轮:先按原样画一帧,再平滑收成摘要。往上翻着看的
         // 不播动画,直接收 —— 过程一律收起来,不再有"读过就不收"。
         if (_pinned) _settling.add('tp${turn.startSeq}');

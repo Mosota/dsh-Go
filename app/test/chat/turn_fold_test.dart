@@ -45,7 +45,7 @@ void main() {
       final tools = s.items.whereType<ToolChatItem>().length;
       expect(process.toolCalls, tools);
       expect(process.trace, same(s.turns.single));
-      expect(turnProcessLabel(process), startsWith('已完成 · $tools 次工具调用'));
+      expect(turnProcessLabel(process), startsWith('已完成 · ${tools + process.messages} 步'));
       // Nothing is lost: every tool call is somewhere inside.
       final inside = [
         for (final r in process.rows)
@@ -77,17 +77,20 @@ void main() {
       expect(rows.whereType<TurnProcessRow>(), isEmpty);
     });
 
-    test('the running turn stays open; the finished one before it folds', () {
+    test('the running turn folds too: 思考中… · N 步', () {
       final s = runInfoState();
       final rows = deriveRows(items: s.items, turns: s.turns, running: true, foldTurns: true);
-      expect(rows.whereType<TurnProcessRow>(), hasLength(1));
-      final second = rows.lastIndexWhere((r) => r is UserRow);
-      expect(rows.indexWhere((r) => r is TurnProcessRow), lessThan(second));
-      expect(rows.skip(second).whereType<ToolCallRow>(), isNotEmpty);
+      final folds = rows.whereType<TurnProcessRow>().toList();
+      expect(folds, hasLength(2), reason: '跑着的那一轮也有收起行');
+      expect(folds.first.running, isFalse);
+      expect(folds.last.running, isTrue);
+      expect(turnProcessLabel(folds.last), startsWith('思考中… · '));
     });
   });
 
-  test('a stopped turn stays open', () {
+  // The cancelled fixture is one streamed reply with no process to fold: 一行
+  // 思考/一段正文本来就只有一行,包一层没意义(纯问答不折叠这条保留)。
+  test('a stopped turn with no process stays as one reply', () {
     final t = ChatTranscript();
     for (final line in File('../packages/dsh_client/test/fixtures/follow_cancel.jsonl').readAsLinesSync()) {
       if (line.trim().isEmpty) continue;
@@ -96,6 +99,24 @@ void main() {
     expect(t.turns.where((x) => !x.running), isNotEmpty);
     final rows = deriveRows(items: t.items, turns: t.turns, foldTurns: true);
     expect(rows.whereType<TurnProcessRow>(), isEmpty);
+  });
+
+  test('a stopped turn with a process folds, and says 已中断', () {
+    final rows = deriveRows(
+      items: [
+        user(1, 'q'),
+        assistant(2, '', reasoning: '先看一眼'),
+        tool('a', 'bash', {'command': 'ls'}),
+        assistant(4, '一半的回答'),
+      ],
+      turns: [trace(startSeq: 1, endSeq: 5, reason: 'aborted')],
+      foldTurns: true,
+    );
+    final folds = rows.whereType<TurnProcessRow>().toList();
+    expect(folds, hasLength(1), reason: '被停下的轮一样给收起行');
+    expect(folds.single.running, isFalse);
+    expect(turnProcessLabel(folds.single), startsWith('已中断 · '));
+    expect((rows.last as AssistantRow).item.text, '一半的回答', reason: '回答留在折叠行外面');
   });
 
   group('synthetic', () {
@@ -128,7 +149,7 @@ void main() {
       final process = rows[1] as TurnProcessRow;
       expect(process.toolCalls, 2);
       expect(process.messages, 1);
-      expect(turnProcessLabel(process), '已完成 · 2 次工具调用 · 1 条消息');
+      expect(turnProcessLabel(process), '已完成 · 3 步');
       // The interim reply carries no actions inside the fold.
       expect(process.rows.whereType<AssistantRow>().every((r) => !r.showActions), isTrue);
     });
@@ -136,7 +157,7 @@ void main() {
     // Steered turns and several turns between two user messages fold piece
     // by piece: see rows_fold_test.dart.
 
-    test('a failed turn stays open', () {
+    test('a failed turn folds too', () {
       final rows = deriveRows(
         items: [
           user(1, 'q'),
@@ -146,7 +167,9 @@ void main() {
         turns: [trace(startSeq: 1, endSeq: 4, reason: 'error')],
         foldTurns: true,
       );
-      expect(rows.whereType<TurnProcessRow>(), isEmpty);
+      final folds = rows.whereType<TurnProcessRow>().toList();
+      expect(folds, hasLength(1));
+      expect(turnProcessLabel(folds.single), '出错 · 1 步');
     });
   });
 

@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import android.os.SystemClock
+import android.util.Base64
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -137,7 +138,17 @@ class BackgroundControl private constructor(context: Context) {
     private val root = RootStarter(app) { transportChanged("root") }
 
     private val mode: String get() = keep.mode
+
+    /** warmUp runs once per process, after the first frame. */
+    @Volatile private var warmStarted = false
     @Volatile private var rootSelected = mode == "root"
+
+    /**
+     * 虚拟屏's own switch: whether the agent may run on the virtual display. The
+     * 特权通道 above is just the transport; this can be turned off while keeping
+     * the channel for the model's `shell` tool.
+     */
+    @Volatile private var vdisplayEnabled: Boolean = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(K_VDISPLAY, false)
     @Volatile private var channel: PrivilegedChannel? = null
     private val taskResource = BackgroundTaskSlot<BackgroundDisplay, PrivilegedChannel>(this)
     // Lock order: this -> keepGuard -> previewGuard (either prefix may be omitted). Never IPC or a reverse lock under previewGuard.
@@ -442,6 +453,7 @@ class BackgroundControl private constructor(context: Context) {
         val cached = gate.snapshot
         return mapOf(
             "mode" to PrivilegedPathPolicy.legacyMode(mode),
+            "vdisplayEnabled" to vdisplayEnabled,
             "ready" to PrivilegedPathPolicy.legacyReady(mode, reason == null),
             "reason" to PrivilegedPathPolicy.legacyReason(
                 mode, reason, AppStrings.get(app, R.string.background_root_legacy_client),
@@ -654,6 +666,9 @@ class BackgroundControl private constructor(context: Context) {
             try {
                 // Do not change the selected transport while its original resource remains unconfirmed.
                 if (changing && !endTask()) return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.phone_background_cleanup_before_switch))
+                // Remembered apart from the keep gate so a background kill does not read as "off".
+                app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(K_MODE, selected).apply()
                 val (selection, transition, previewChanged) = synchronized(this) {
                     synchronized(keepGuard) {
                         if (!mayStart() || selectionChange != null) return keepFailure("selectionChanged")
@@ -709,6 +724,36 @@ class BackgroundControl private constructor(context: Context) {
                 if (keep.enabled) restoreKeptChannel()
             }
         } finally { endTransportUse() }
+    }
+
+    /**
+     * 启动即重连: a channel the person left on comes back without a tap. The binder died with
+     * the app, so this re-connects and re-probes once, off the main thread; a failure simply
+     * leaves the cached "not ready" the page already shows.
+     */
+    fun warmUp() {
+        // Defensive from the first line: this runs while the app is still starting up, and a
+        // failure here must never reach the caller (or the person sees "not ready" for no reason).
+        runCatching {
+            if (warmStarted) return
+            warmStarted = true
+            val saved = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(K_MODE, "off") ?: "off"
+            if (saved == "off") return
+            val looper = android.os.Looper.getMainLooper() ?: return
+            android.os.Handler(looper).postDelayed({
+                runCatching {
+                    Thread({
+                        runCatching {
+                            if (mode == "off" && androidOk()) {
+                                android.util.Log.i("DshPhone", "warm-up: restoring $saved")
+                                setBackgroundMode(saved) { true }
+                            }
+                        }
+                        runCatching { notifyChanged() }
+                    }, "dsh-privileged-warmup").apply { isDaemon = true }.start()
+                }
+            }, WARM_DELAY_MS)
+        }
     }
 
     fun requestShizukuPermission(provider: String? = null): Boolean =
@@ -864,6 +909,124 @@ class BackgroundControl private constructor(context: Context) {
 
     fun requestShizukuPermission(then: () -> Unit): Boolean = shizuku.requestPermission(then)
 
+    /** #153: run one command through the privileged channel (used by the `shell` tool). */
+    fun exec(cmd: String, timeoutMs: Int?, cwd: String?): Map<String, Any?> {
+        val ch = activeChannel() ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_not_ready))
+        val request = Bundle().apply {
+            putString(Proto.OP, Proto.OP_EXEC)
+            putString(Proto.CMD, cmd)
+            if (timeoutMs != null) putInt(Proto.TIMEOUT_MS, timeoutMs)
+            if (cwd != null) putString(Proto.CWD, cwd)
+        }
+        val response = runCatching { ch.execute(request) }.getOrNull()
+            ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_no_response))
+        return mapOf(
+            "ok" to response.getBoolean(Proto.OK),
+            "rc" to response.getInt(Proto.RC),
+            "stdout" to response.getString(Proto.STDOUT).orEmpty(),
+            "stderr" to response.getString(Proto.STDERR).orEmpty(),
+            "truncated" to response.getBoolean(Proto.TRUNCATED),
+            "reason" to response.getString(Proto.ERROR),
+        )
+    }
+
+    /** #153: device facts in one round trip (used by the `device` tool). */
+    fun deviceDump(): Map<String, Any?> {
+        val ch = activeChannel() ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_not_ready))
+        val response = runCatching { ch.execute(Bundle().apply { putString(Proto.OP, Proto.OP_DUMP) }) }.getOrNull()
+            ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_no_response))
+        return mapOf(
+            "ok" to response.getBoolean(Proto.OK),
+            "text" to response.getString(Proto.STDOUT).orEmpty(),
+            "reason" to response.getString(Proto.ERROR),
+        )
+    }
+
+    // ---- 悬浮窗 预览: the display a running task already owns, read-only -----
+
+    /**
+     * One frame of the 虚拟屏 a task is already running, for the 悬浮窗: base64 [Proto.IMAGE_BYTES]
+     * under `png` (the engine captures JPEG; Flutter decodes by content). The preview owner in
+     * [PrivilegedDisplayCore] never takes, releases or recreates that display, so polling this
+     * cannot end a task. `reasonCode` `noDisplay` means nothing is running.
+     */
+    fun frame(): Map<String, Any?> {
+        val response = preview(Proto.OP_OBSERVE) { putBoolean(Proto.WANT_IMAGE, true) }
+            ?: return previewFailure(NO_DISPLAY)
+        val bytes = response.getByteArray(Proto.IMAGE_BYTES) ?: return previewFailure(response)
+        return mapOf(
+            "ok" to true,
+            "width" to response.getInt(Proto.WIDTH),
+            "height" to response.getInt(Proto.HEIGHT),
+            "mime" to response.getString(Proto.IMAGE_MIME),
+            "png" to Base64.encodeToString(bytes, Base64.NO_WRAP),
+        )
+    }
+
+    /** Whether the 悬浮窗 has anything to show, and its pixel size. */
+    fun vscreenState(): Map<String, Any?> {
+        val response = preview(Proto.OP_OBSERVE) {} ?: return previewFailure(NO_DISPLAY)
+        return mapOf(
+            "available" to response.getBoolean(Proto.OK),
+            "width" to response.getInt(Proto.WIDTH),
+            "height" to response.getInt(Proto.HEIGHT),
+        )
+    }
+
+    /** A tap at virtual-screen pixels (the caller maps its own view's size first). */
+    fun vscreenTap(x: Int, y: Int): Map<String, Any?> = previewResult(preview(Proto.OP_TAP) {
+        putInt(Proto.POINT_X, x)
+        putInt(Proto.POINT_Y, y)
+    })
+
+    fun vscreenSwipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Map<String, Any?> =
+        previewResult(preview(Proto.OP_SCROLL) {
+            putInt(Proto.POINT_X, x1)
+            putInt(Proto.POINT_Y, y1)
+            putInt(Proto.POINT_X2, x2)
+            putInt(Proto.POINT_Y2, y2)
+            putInt(Proto.DURATION_MS, durationMs)
+        })
+
+    /** One request as [Proto.OWNER_PREVIEW]; null when there is no channel to send it on. */
+    private fun preview(op: String, fill: Bundle.() -> Unit): Bundle? {
+        val ch = activeChannel() ?: return null
+        val request = Bundle()
+        request.putString(Proto.OP, op)
+        request.putString(Proto.OWNER, Proto.OWNER_PREVIEW)
+        request.fill()
+        return runCatching { ch.execute(request) }.getOrNull()
+    }
+
+    private fun previewResult(response: Bundle?): Map<String, Any?> {
+        if (response == null) return previewFailure(NO_DISPLAY)
+        if (response.getBoolean(Proto.OK)) return mapOf("ok" to true)
+        return previewFailure(response)
+    }
+
+    private fun previewFailure(response: Bundle): Map<String, Any?> =
+        previewFailure(response.getString(Proto.ERROR) ?: NO_DISPLAY)
+
+    // l10n:keep agent-vs-screen wording (the floating window shows the same line)
+    private fun previewFailure(code: String): Map<String, Any?> = mapOf(
+        "ok" to false,
+        "reasonCode" to code,
+        "reason" to if (code == NO_DISPLAY) "虚拟屏未运行" else Reasons.of(code),
+    )
+
+    // ---- task lifecycle (called by the bridge/core) ------------------------
+
+    /** 虚拟屏's own switch, independent of the channel ([setBackgroundMode]). */
+    fun setVdisplayEnabled(enabled: Boolean): Boolean {
+        vdisplayEnabled = enabled
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(K_VDISPLAY, enabled).apply()
+        // Off takes effect at once: the display goes, the channel stays for shell. Both the teardown
+        // and the status broadcast are best-effort: the switch itself has already flipped.
+        if (!enabled) runCatching { endTask() }
+        runCatching { notifyChanged() }
+        return true
+    }
+
     /** Read-only diagnostics: only the already selected live link; never starts a transport or gate. */
     fun collectSystemIme(mayStart: () -> Boolean): Map<String, Any?> {
         val evidence = io.github.ccch1mneyyy.dsh_app.diagnostics.SystemImeEvidence
@@ -914,7 +1077,7 @@ class BackgroundControl private constructor(context: Context) {
     internal fun prepareForTask(owner: PhoneTasks.Owner, currentOwner: () -> Boolean): String? {
         if (!currentOwner()) return AppStrings.get(app, R.string.background_selection_cancelled)
         resourceAdmission()?.let { return it }
-        if (mode == "off" || !androidOk()) return readiness() ?: AppStrings.get(app, R.string.background_not_ready)
+        if (mode == "off" || !vdisplayEnabled || !androidOk()) return readiness() ?: AppStrings.get(app, R.string.background_not_ready)
         synchronized(this) {
             // Reuse does not create a slot or replace a peer. Other WSS users must not revoke it.
             if (taskResource.find(owner) != null) return null
@@ -1564,10 +1727,23 @@ class BackgroundControl private constructor(context: Context) {
         /** UserHandle.PER_USER_RANGE: a uid's user is uid / this. */
         private const val PER_USER_RANGE = 100_000
 
+        private const val PREFS = "dsh_phone_background"
+        private const val K_VDISPLAY = "vdisplayEnabled"
+        private const val K_MODE = "channelMode"
+
+        /** Startup re-connect waits this long so the splash is never held by Shizuku. */
+        private const val WARM_DELAY_MS = 2_500L
+
+        /** `reasonCode` of a preview request with no display (or no channel) to read. */
+        const val NO_DISPLAY = "noDisplay"
+
         @Volatile private var instance: BackgroundControl? = null
         fun get(context: Context): BackgroundControl =
             instance ?: synchronized(this) {
-                instance ?: BackgroundControl(context).also { instance = it }
+                instance ?: BackgroundControl(context).also {
+                    instance = it
+                    it.warmUp()
+                }
             }
     }
 }

@@ -65,6 +65,23 @@ object Proto {
     const val WANT_IMAGE = "image"
     const val DETAIL = "detail"
 
+    // 悬浮窗 预览 ([OWNER_PREVIEW]): tap/scroll by pixel, so no element id is involved.
+    const val POINT_X = "x"
+    const val POINT_Y = "y"
+    const val POINT_X2 = "x2"
+    const val POINT_Y2 = "y2"
+    const val WIDTH = "width"
+    const val HEIGHT = "height"
+    const val IMAGE_BYTES = "imageBytes"
+    const val IMAGE_MIME = "imageMime"
+
+    /**
+     * The 悬浮窗's read-only owner. It never takes ownership of a display: it reads a frame from
+     * the display a task already runs and injects at the coordinates it is given, so watching the
+     * virtual screen can never take it away from that task.
+     */
+    const val OWNER_PREVIEW = "__preview__"
+
     // ops
     const val OP_PREVIEW = "preview"
     const val PREVIEW_VERSION = "previewVersion"
@@ -145,9 +162,31 @@ object Proto {
     /** 自动恢复无障碍: grants [APP_PACKAGE] WRITE_SECURE_SETTINGS in [USER]; nothing else is grantable. */
     const val OP_GRANT_SECURE_SETTINGS = "grantSecureSettings"
     const val USER = "user"
-    const val APP_PACKAGE = "io.github.ccch1mneyyy.dsh_app"
+    const val APP_PACKAGE = "io.github.mosota.dshgo"
+
+    // ---- #153: the same privileged channel, opened to the model -----------------
+    /** Run one command as the channel's uid (shell): [CMD], [TIMEOUT_MS], [CWD]. */
+    const val OP_EXEC = "exec"
+
+    /** One-shot device picture: build, display, storage, battery, network, package count. */
+    const val OP_DUMP = "dump"
+
+    const val CMD = "cmd"
+    const val TIMEOUT_MS = "timeoutMs"
+    const val CWD = "cwd"
+    const val RC = "rc"
+    const val STDOUT = "stdout"
+    const val STDERR = "stderr"
+    const val TRUNCATED = "truncated"
 
     const val INJECT_OK = "injectOk"
+
+    /**
+     * Gate only: the injection could not be tested at all (the ROM refused the probe
+     * window, e.g. SecurityException while creating the test Presentation). Untested,
+     * not broken — the channel stays usable and the reason is shown as a warning.
+     */
+    const val INJECT_UNVERIFIED = "injectUnverified"
     /** Gate only, with INJECT_OK false: the failing injection's [ERROR] code. Older cores omit it. */
     const val INJECT_ERROR = "injectError"
     /** With [ERROR] deviceUnavailable: the failing step's exception type, never its message. Older cores omit it. */

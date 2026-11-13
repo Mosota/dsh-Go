@@ -105,7 +105,8 @@ void main() {
       expect(before.cut, 6);
       expect(before.key, 'tp0@6');
       expect(before.toolCalls, 2);
-      expect(turnProcessLabel(before), '已完成 · 2 次工具调用');
+      expect(before.running, isFalse);
+      expect(turnProcessLabel(before), '已完成 · 2 步');
 
       final last = rows[3] as TurnProcessRow;
       expect(last.cut, isNull);
@@ -199,7 +200,7 @@ void main() {
       expect(_types(rows), [UserRow, TurnProcessRow, UserRow, TurnProcessRow, AssistantRow]);
       final before = rows[1] as TurnProcessRow;
       expect(before.messages, 1);
-      expect(turnProcessLabel(before), '已完成 · 1 次工具调用 · 1 条消息');
+      expect(turnProcessLabel(before), '已完成 · 2 步');
       _expectSane(rows);
     });
 
@@ -212,17 +213,23 @@ void main() {
       expect(_types(rows), [UserRow, AssistantRow, UserRow, TurnProcessRow, AssistantRow]);
     });
 
-    test('while it runs nothing folds; it folds once it completes', () {
+    test('running also folds: 思考中… · N 步, and again once it completes', () {
       final live = deriveRows(items: steered.sublist(0, 7), turns: [_running(0)], running: true, foldTurns: true);
-      expect(live.whereType<TurnProcessRow>(), isEmpty);
+      final folds = live.whereType<TurnProcessRow>().toList();
+      expect(folds, hasLength(2), reason: '运行中也有收起行');
+      expect([for (final f in folds) f.key], ['tp0@6', 'tp0']);
+      expect([for (final f in folds) f.running], [true, true]);
+      expect(turnProcessLabel(folds.last), '思考中… · 1 步');
+      _expectSane(live);
       expect(_calls(live), ['search', 'fetch', 'run']);
 
       final done = deriveRows(items: steered, turns: [_trace(0, 12)], foldTurns: true);
       expect(done.whereType<TurnProcessRow>(), hasLength(2));
+      expect(done.whereType<TurnProcessRow>().every((f) => !f.running), isTrue);
     });
 
     for (final reason in ['aborted', 'error']) {
-      test('an $reason turn stays open, steered or not', () {
+      test('an $reason turn folds too, steered or not', () {
         final rows = deriveRows(
           items: [
             ...steered,
@@ -231,7 +238,10 @@ void main() {
           turns: [_trace(0, 12, reason: reason)],
           foldTurns: true,
         );
-        expect(rows.whereType<TurnProcessRow>(), isEmpty);
+        final folds = rows.whereType<TurnProcessRow>().toList();
+        expect(folds, hasLength(2), reason: '中断 / 出错一样给收起行');
+        expect(folds.every((f) => !f.running), isTrue);
+        expect(turnProcessLabel(folds.last), startsWith(reason == 'aborted' ? '已中断 · ' : '出错 · '));
         expect(_types(rows).where((t) => t == UserRow), hasLength(2));
       });
     }
@@ -290,17 +300,21 @@ void main() {
       expect((rows[card - 1] as AssistantRow).item.text, '第一轮完成。');
     });
 
-    test('the finished turn folds while the next one runs', () {
+    test('the finished turn folds while the next one runs (which folds too)', () {
       final rows = deriveRows(
         items: items.sublist(0, 6),
         turns: [_trace(0, 5), _running(6)],
         running: true,
         foldTurns: true,
       );
-      expect(_types(rows), [UserRow, TurnProcessRow, AssistantRow, ChangeCardRow, ToolCallRow, ToolCallRow]);
+      expect(_types(rows), [UserRow, TurnProcessRow, AssistantRow, ChangeCardRow, TurnProcessRow]);
+      final live = rows.last as TurnProcessRow;
+      expect(live.running, isTrue);
+      expect(turnProcessLabel(live), startsWith('思考中… · '));
+      expect(_calls(live.rows), ['job', 'check']);
     });
 
-    test('a stopped turn after a folded one stays open', () {
+    test('a stopped turn after a folded one folds as well', () {
       final rows = deriveRows(
         items: [
           ...items,
@@ -312,7 +326,7 @@ void main() {
         ],
         foldTurns: true,
       );
-      expect(rows.whereType<TurnProcessRow>().map((f) => f.key), ['tp0']);
+      expect(rows.whereType<TurnProcessRow>().map((f) => f.key), ['tp0', 'tp6']);
       expect(_calls(rows.skip(4).toList()), ['job', 'check']);
     });
   });

@@ -122,16 +122,27 @@ final class ArtifactCardRow extends ChatRow {
   String get key => 'art${group.endSeq}';
 }
 
-/// 正常结束的一轮:思考、工具调用和中间消息收成一行摘要,最终回答留在
-/// 外面(官方 Web 的 foldCompletedTurns)。点开后 [rows] 长在这一行里面。
-/// 被停下、出错的轮不收,停在哪一步要一眼看得到。
+/// 一轮的过程:思考、工具调用和中间消息收成一行摘要,最终回答留在外面
+/// (官方 Web 的 foldCompletedTurns)。点开后 [rows] 长在这一行里面。
+/// **任何状态都收**:运行中(摘要行是「思考中… · N 步」)、正常结束、被
+/// 中断、出错,一律给这一行 —— 收起入口在每种状态下都要有。
 ///
 /// 运行中插话把一轮切成几片时,每一片各收一行:插话之前的片 [cut] 是那条
 /// 插话的 seq,最后一片(带最终回答和脚注)[cut] 为 null。
 final class TurnProcessRow extends ChatRow {
-  const TurnProcessRow(this.trace, this.rows, {required this.toolCalls, required this.messages, this.cut});
+  const TurnProcessRow(
+    this.trace,
+    this.rows, {
+    required this.toolCalls,
+    required this.messages,
+    this.cut,
+    this.running = false,
+  });
   final TurnTrace trace;
   final List<ChatRow> rows;
+
+  /// 这一轮还在跑:摘要行写「思考中…」,过程照样可以点开看。
+  final bool running;
 
   /// 收进来的工具调用次数。
   final int toolCalls;
@@ -192,10 +203,10 @@ int debugDeriveRowsCount = 0;
 ///   的轮再接一张 [ArtifactCardRow](按 `turn/end` 对位);
 /// - 结束了的轮带回合脚注:挂在这一轮最后一条回复的操作行上,没有这样的
 ///   回复时单独一行 [TurnFootnoteRow];
-/// - [foldTurns] 时,正常结束的一轮每一片把过程收进一行 [TurnProcessRow]:
-///   最后一片留最终回答,插话之前的片留它最后说的那句话(回答自己的思考也
-///   收进去);用户消息不会被收进去;带原生卡片的调用,工具行收进去、卡片
-///   本身留在外面(接在过程行后面);
+/// - [foldTurns] 时,每一轮每一片都把过程收进一行 [TurnProcessRow](运行中、
+///   完成、中断、出错一视同仁):最后一片留最终回答,插话之前的片留它最后说的
+///   那句话(回答自己的思考也收进去);用户消息不会被收进去;带原生卡片的调用,
+///   工具行收进去、卡片本身留在外面(接在过程行后面);
 /// - 斜杠指令按 seq 插进它执行时的位置,本机还没落盘的接在末尾;
 /// - 被中断的助手正文后面那条"已停止"提示省掉(正文末尾已有标记);
 /// - 游离的审批、提问卡、未回显的乐观消息依次接在末尾(等待中由输入条上的
@@ -287,7 +298,8 @@ List<ChatRow> deriveRows({
 
   /// 收起当前片的过程,保留显式正式答案;没有标记时用 [reply] 回退。
   /// 返回最后一条外露回复的新下标(全收进去时 null)。[cut]:这一片结束在哪条插话。
-  int? fold(TurnTrace trace, int? reply, {int? cut}) {
+  /// [running]:这一轮还在跑(摘要行写「思考中…」,不挂脚注)。
+  int? fold(TurnTrace trace, int? reply, {int? cut, bool running = false}) {
     final start = pieceStart!;
     // Prefer explicit final answers: a late subagent result can produce another
     // answer in the same turn. Older hosts/models keep the positional fallback.
@@ -351,7 +363,14 @@ List<ChatRow> deriveRows({
     // 只有一段思考(普通问答):思考胶囊本来就是一行,不必再收一层。
     if (toolCalls == 0 && messages == 0 && process.length <= 1) return reply;
     final replacement = [
-      TurnProcessRow(trace, List.unmodifiable(process), toolCalls: toolCalls, messages: messages, cut: cut),
+      TurnProcessRow(
+        trace,
+        List.unmodifiable(process),
+        toolCalls: toolCalls,
+        messages: messages,
+        cut: cut,
+        running: running,
+      ),
       ...kept,
       ?answerRow,
     ];
@@ -371,10 +390,14 @@ List<ChatRow> deriveRows({
     final last = cut == null;
     final trace = turn;
     final done = trace != null && !trace.running && trace.endSeq != null ? trace : null;
+    final live = trace != null && trace.running ? trace : null;
     var index = lastText;
-    if (foldTurns && done != null && pieceStart != null && (done.endReason?.isCompleted ?? false)) {
-      index = fold(done, index, cut: cut);
+    // 只要拿到 trace 就折叠:运行中、完成、中断、出错,一律给折叠行。
+    // 「能不能折叠」和「是不是正常结束」是两件事,别再绑在一起。
+    if (foldTurns && pieceStart != null && (done != null || live != null)) {
+      index = fold(done ?? live!, index, cut: cut, running: live != null);
     }
+    // 脚注仍只在结束时挂。
     final footnote = last ? done : null;
     if (index != null) {
       final row = rows[index] as AssistantRow;
@@ -473,6 +496,11 @@ List<ChatRow> deriveRows({
   }
   if (running) {
     flushTools(live: true);
+    // 跑着的时候也收:上面是「思考中… · N 步」,正在流式输出的回答留在外面。
+    final trace = turn;
+    if (foldTurns && pieceStart != null && trace != null && trace.running) {
+      fold(trace, lastText, running: true);
+    }
   } else {
     close();
   }

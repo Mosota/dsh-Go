@@ -4,6 +4,8 @@
 // (MissingPluginException → "未就绪") or failing (PlatformException → a reason).
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
@@ -323,6 +325,7 @@ class BackgroundParallelism {
 class PhoneBackgroundStatus {
   const PhoneBackgroundStatus({
     this.mode = PhoneBackgroundMode.off,
+    this.vdisplayEnabled = false,
     this.ready = false,
     this.reason,
     this.androidOk = false,
@@ -340,6 +343,7 @@ class PhoneBackgroundStatus {
 
   factory PhoneBackgroundStatus.fromMap(Map<Object?, Object?> m) => PhoneBackgroundStatus(
     mode: PhoneBackgroundMode.parse(m['mode']),
+    vdisplayEnabled: m['vdisplayEnabled'] == null ? false : _flag(m['vdisplayEnabled']),
     ready: _flag(m['ready']),
     reason: _text(m['reason']),
     androidOk: _flag(m['androidOk']),
@@ -356,6 +360,10 @@ class PhoneBackgroundStatus {
   );
 
   final PhoneBackgroundMode mode;
+
+  /// 虚拟屏's own switch: the agent may run on the virtual display. The
+  /// channel above is the transport both this and the model's `shell` use.
+  final bool vdisplayEnabled;
 
   /// The chosen mode can drive a virtual display right now.
   final bool ready;
@@ -643,6 +651,9 @@ class PhoneStatus {
     this.statusRevisionPresent = false,
     this.error,
     this.enabled = false,
+    this.shellAllowed = false,
+    this.shellGuard = true,
+    this.guardCategories = const {},
     this.bridgeListening = false,
     this.a11y = const PhoneA11yStatus(),
     this.a11yKeeper = const A11yKeeperStatus(),
@@ -666,6 +677,9 @@ class PhoneStatus {
       statusRevision = null,
       statusRevisionPresent = false,
       enabled = false,
+      shellAllowed = false,
+      shellGuard = true,
+      guardCategories = const {},
       bridgeListening = false,
       a11y = const PhoneA11yStatus(),
       a11yKeeper = const A11yKeeperStatus(),
@@ -687,6 +701,9 @@ class PhoneStatus {
         ? m['statusRevision'] as int : null,
     statusRevisionPresent: m.containsKey('statusRevision'),
     enabled: _flag(m['enabled']),
+    shellAllowed: _flag(m['shellAllowed']),
+    shellGuard: m['shellGuard'] == null ? true : _flag(m['shellGuard']),
+    guardCategories: _shellGuardCategories(m['shellGuardCategories']),
     bridgeListening: _flag(m['bridgeListening']),
     a11y: PhoneA11yStatus.fromMap(_map(m['a11y'])),
     a11yKeeper: A11yKeeperStatus.fromMap(_map(m['a11yKeeper'])),
@@ -717,6 +734,15 @@ class PhoneStatus {
 
   /// The master switch 「手机操控」.
   final bool enabled;
+
+  /// #153: the model may use the `shell`/`device` tools (independent of 虚拟屏).
+  final bool shellAllowed;
+
+  /// Dangerous shell commands are refused before they reach the channel.
+  final bool shellGuard;
+
+  /// Per-category consent under 拦截危险命令: uninstall / security / files / power.
+  final Map<String, bool> guardCategories;
   final bool bridgeListening;
   final PhoneA11yStatus a11y;
   final A11yKeeperStatus a11yKeeper;
@@ -742,12 +768,16 @@ class PhoneStatus {
   /// waiting to start, or one still draining. Mirrors the native refusal of 解除限制.
   bool get anyTaskBusy => task.active || tasks.any((t) => t.active || t.pendingCalls > 0 || t.draining);
 
-  PhoneStatus copyWith({bool? enabled, bool? ready, Object? error = _keepError}) => PhoneStatus(
+  PhoneStatus copyWith({bool? enabled, bool? ready, Object? error = _keepError,
+      bool? shellAllowed, bool? shellGuard}) => PhoneStatus(
     ready: ready ?? this.ready,
     error: identical(error, _keepError) ? this.error : error as String?,
     statusRevision: statusRevision,
     statusRevisionPresent: statusRevisionPresent,
     enabled: enabled ?? this.enabled,
+    shellAllowed: shellAllowed ?? this.shellAllowed,
+    shellGuard: shellGuard ?? this.shellGuard,
+    guardCategories: guardCategories,
     bridgeListening: bridgeListening,
     a11y: a11y,
     a11yKeeper: a11yKeeper,
@@ -807,6 +837,150 @@ class PhoneOverlayPrefs {
 
   @override
   int get hashCode => Object.hash(idleOpacity, autoCollapse);
+}
+
+// ── 息屏保活 / 全局省电 ──────────────────────────────────────────────────────
+
+/// 设置 → 操控通道与工具 → 保活 (`keepAlivePrefs` / `setKeepAlivePrefs`), plus
+/// 设置 → 性能 → 全局省电. Stored natively: DshService, the shell watchdog and the
+/// frame poll all read the same three keys.
+class PhoneKeepAlivePrefs {
+  const PhoneKeepAlivePrefs({
+    this.keepAliveEnabled = true,
+    this.keepAliveEconomy = true,
+    this.globalPowerSaver = false,
+    this.watchSeconds = 60,
+    this.watchdogRunning = false,
+  });
+
+  factory PhoneKeepAlivePrefs.fromMap(Map<Object?, Object?> m) => PhoneKeepAlivePrefs(
+    keepAliveEnabled: m['keepAliveEnabled'] == null ? true : _flag(m['keepAliveEnabled']),
+    keepAliveEconomy: m['keepAliveEconomy'] == null ? true : _flag(m['keepAliveEconomy']),
+    globalPowerSaver: _flag(m['globalPowerSaver']),
+    watchSeconds: _int(m['watchSeconds']) ?? 60,
+    watchdogRunning: _flag(m['watchdogRunning']),
+  );
+
+  /// 保持后台运行: 前台常驻 + START_STICKY + wakelock + 系统白名单 + shell 看门狗.
+  final bool keepAliveEnabled;
+
+  /// 保活时省电: 300 s watchdog interval, no performance lock, short idle wakelock renewals.
+  final bool keepAliveEconomy;
+
+  /// 全局省电: independent and highest priority; pauses idle preview and lowers log writes.
+  final bool globalPowerSaver;
+
+  /// What the native side actually uses now (300 with either saver, else 60).
+  final int watchSeconds;
+
+  /// The shell-uid watchdog is alive (read only).
+  final bool watchdogRunning;
+
+  PhoneKeepAlivePrefs copyWith({
+    bool? keepAliveEnabled,
+    bool? keepAliveEconomy,
+    bool? globalPowerSaver,
+    int? watchSeconds,
+    bool? watchdogRunning,
+  }) => PhoneKeepAlivePrefs(
+    keepAliveEnabled: keepAliveEnabled ?? this.keepAliveEnabled,
+    keepAliveEconomy: keepAliveEconomy ?? this.keepAliveEconomy,
+    globalPowerSaver: globalPowerSaver ?? this.globalPowerSaver,
+    watchSeconds: watchSeconds ?? this.watchSeconds,
+    watchdogRunning: watchdogRunning ?? this.watchdogRunning,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is PhoneKeepAlivePrefs &&
+      other.keepAliveEnabled == keepAliveEnabled &&
+      other.keepAliveEconomy == keepAliveEconomy &&
+      other.globalPowerSaver == globalPowerSaver &&
+      other.watchSeconds == watchSeconds &&
+      other.watchdogRunning == watchdogRunning;
+
+  @override
+  int get hashCode => Object.hash(keepAliveEnabled, keepAliveEconomy, globalPowerSaver, watchSeconds, watchdogRunning);
+}
+
+// ── 悬浮球 ───────────────────────────────────────────────────────────────────
+
+/// 设置 → 手机操控 → 悬浮球 (`ballPrefs` / `setBallPrefs`): how big the ball is, how
+/// opaque, and whether (and when) it slides half off its edge when left alone.
+/// The native side owns them; a showing ball follows a write at once.
+class PhoneBallPrefs {
+  const PhoneBallPrefs({
+    this.sizeDp = defaultSizeDp,
+    this.opacity = defaultOpacity,
+    this.idleHide = true,
+    this.idleMs = defaultIdleMs,
+    this.showing = false,
+  });
+
+  factory PhoneBallPrefs.fromMap(Map<Object?, Object?> m) => PhoneBallPrefs(
+    sizeDp: clampSize(m['sizeDp'] is num ? (m['sizeDp'] as num).toInt() : defaultSizeDp),
+    opacity: clampOpacity(m['opacity'] is num ? (m['opacity'] as num).toDouble() : defaultOpacity),
+    idleHide: _flag(m['idleHide']),
+    idleMs: clampIdle(m['idleMs'] is num ? (m['idleMs'] as num).toInt() : defaultIdleMs),
+    showing: _flag(m['showing']),
+  );
+
+  /// 56 dp: the accessibility ball's size, and the capsule's height.
+  static const defaultSizeDp = 56;
+  static const minSizeDp = 40;
+  static const maxSizeDp = 72;
+
+  /// Solid by default: the mark reads on any page.
+  static const defaultOpacity = 1.0;
+  static const minOpacity = 0.6;
+  static const maxOpacity = 1.0;
+
+  /// 3 s: long enough not to hide while reading, short enough to be out of the way.
+  static const defaultIdleMs = 3000;
+  static const minIdleMs = 1000;
+  static const maxIdleMs = 10000;
+
+  final int sizeDp;
+
+  /// 0.6–1.
+  final double opacity;
+
+  /// 闲置后自动半隐.
+  final bool idleHide;
+  final int idleMs;
+
+  /// The ball is up now (read only: the switch opens and closes it).
+  final bool showing;
+
+  int get percent => (opacity * 100).round();
+  int get idleSeconds => (idleMs / 1000).round();
+
+  static int clampSize(int v) => v.clamp(minSizeDp, maxSizeDp).toInt();
+
+  static double clampOpacity(double v) =>
+      v.isNaN ? defaultOpacity : (v.clamp(minOpacity, maxOpacity) * 100).round() / 100;
+
+  /// Whole seconds, 1–10.
+  static int clampIdle(int v) => ((v.clamp(minIdleMs, maxIdleMs) + 500) ~/ 1000 * 1000).clamp(minIdleMs, maxIdleMs).toInt();
+
+  PhoneBallPrefs copyWith({int? sizeDp, double? opacity, bool? idleHide, int? idleMs, bool? showing}) => PhoneBallPrefs(
+    sizeDp: sizeDp == null ? this.sizeDp : clampSize(sizeDp),
+    opacity: opacity == null ? this.opacity : clampOpacity(opacity),
+    idleHide: idleHide ?? this.idleHide,
+    idleMs: idleMs == null ? this.idleMs : clampIdle(idleMs),
+    showing: showing ?? this.showing,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is PhoneBallPrefs &&
+      other.sizeDp == sizeDp &&
+      other.opacity == opacity &&
+      other.idleHide == idleHide &&
+      other.idleMs == idleMs;
+
+  @override
+  int get hashCode => Object.hash(sizeDp, opacity, idleHide, idleMs);
 }
 
 // ── Results ──────────────────────────────────────────────────────────────────
@@ -884,16 +1058,22 @@ class PhoneFinish {
       PhoneFinish(closed: closed, busy: busy, opened: opened, launched: launched, notified: notified, current: false);
 }
 
-/// `{ok, reason?}` replies.
+/// `{ok, reason?, reasonCode?}` replies. [reasonCode] is the stable code behind the
+/// sentence in [reason] (e.g. `noOverlayPermission`), null when the call didn't send one.
 class PhoneResult {
-  const PhoneResult(this.ok, [this.reason, this.pending = false]);
+  const PhoneResult(this.ok, [this.reason, this.pending = false, this.reasonCode]);
 
-  factory PhoneResult.fromMap(Map<Object?, Object?> m) =>
-      PhoneResult(_flag(m['ok']), _text(m['reason']), _flag(m['pending']));
+  factory PhoneResult.fromMap(Map<Object?, Object?> m) => PhoneResult(
+    _flag(m['ok']),
+    _text(m['reason']),
+    _flag(m['pending']),
+    _text(m['reasonCode']),
+  );
 
   final bool ok;
   final String? reason;
   final bool pending;
+  final String? reasonCode;
 }
 
 /// Reply of `testScreen`: the main screen read once.
@@ -1466,6 +1646,87 @@ class PhoneChannel {
 
   Future<PhoneResult> setBackgroundMode(PhoneBackgroundMode mode) => _result('setBackgroundMode', {'mode': mode.name});
 
+  /// #153: the model's `shell`/`device` switch, independent of 虚拟屏.
+  Future<bool> setShellAllowed(bool allowed) => _bool('setShellAllowed', {'allowed': allowed});
+
+  Future<bool> shellAllowed() => _bool('shellAllowed');
+
+  Future<bool> setShellGuard(bool guard) => _bool('setShellGuard', {'guard': guard});
+
+  Future<bool> setShellGuardCategory(String kind, bool allowed) =>
+      _bool('setShellGuardCategory', {'kind': kind, 'allowed': allowed});
+
+  /// 虚拟屏's own switch: off keeps the privileged channel for the model's `shell`.
+  Future<bool> setVdisplayEnabled(bool enabled) => _bool('setVdisplayEnabled', {'enabled': enabled});
+
+  // ── 悬浮窗查看虚拟屏 ─────────────────────────────────────────────────────────
+  // The floating window's own calls: a running 虚拟屏's frames, touches on it, and its
+  // on/off. Native reads the display a task already owns (a read-only owner), so none of
+  // these can take that display away from the task.
+
+  /// One frame of the running 虚拟屏: [bytes] are the engine's capture (JPEG; decode by
+  /// content, not by name) and [width]/[height] are the virtual screen's pixels. Null when
+  /// nothing is running or the native side doesn't answer.
+  Future<({Uint8List bytes, int width, int height})?> vscreenFrame() async {
+    try {
+      final map = await _methods.invokeMapMethod<Object?, Object?>('vscreenFrame');
+      if (map == null || !_flag(map['ok'])) return null;
+      final encoded = _text(map['png']);
+      if (encoded == null) return null;
+      return (
+        bytes: base64Decode(encoded),
+        width: _int(map['width']) ?? 0,
+        height: _int(map['height']) ?? 0,
+      );
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Whether there is a 虚拟屏 to preview, its pixel size, and whether the 悬浮窗 is actually
+  /// on screen now ([showing] — the window's own state, not this run's last request).
+  Future<({bool available, bool showing, int width, int height})> vscreenState() async {
+    try {
+      final map = await _methods.invokeMapMethod<Object?, Object?>('vscreenState');
+      return (
+        available: _flag(map?['available']),
+        showing: _flag(map?['showing']),
+        width: _int(map?['width']) ?? 0,
+        height: _int(map?['height']) ?? 0,
+      );
+    } on MissingPluginException {
+      return (available: false, showing: false, width: 0, height: 0);
+    } on PlatformException {
+      return (available: false, showing: false, width: 0, height: 0);
+    }
+  }
+
+  /// A tap at the virtual screen's own pixels.
+  Future<PhoneResult> vscreenTap(int x, int y) => _result('vscreenTap', {'x': x, 'y': y});
+
+  /// A swipe from `(x1,y1)` to `(x2,y2)` in virtual-screen pixels.
+  Future<PhoneResult> vscreenSwipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) =>
+      _result('vscreenSwipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'durationMs': durationMs});
+
+  /// Opens or closes the floating 虚拟屏 window. Without 显示在其他应用上层 the native side
+  /// opens the system switch and answers `reasonCode: noOverlayPermission`.
+  Future<PhoneResult> setVscreenOverlay(bool open) => _result('vscreenOverlay', {'open': open});
+
+  /// Opens or closes the 悬浮球. Without 显示在其他应用上层 nothing starts: the answer
+  /// carries `reasonCode: noOverlayPermission` and the caller says what to turn on.
+  Future<PhoneResult> setBallOverlay(bool open) => _result('ballOverlay', {'open': open});
+
+  /// The 悬浮球 settings; null without the native side.
+  Future<PhoneBallPrefs?> ballPrefs() => _ball('ballPrefs');
+
+  /// Writes what is given (the rest stays).
+  Future<PhoneResult> setBallPrefs({int? sizeDp, double? opacity, bool? idleHide, int? idleMs}) =>
+      _result('setBallPrefs', {'sizeDp': ?sizeDp, 'opacity': ?opacity, 'idleHide': ?idleHide, 'idleMs': ?idleMs});
+
   /// The caller gates these actions on the advertised versioned capabilities.
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) => _result('setBackgroundMode', {'mode': mode.name});
 
@@ -1592,6 +1853,31 @@ class PhoneChannel {
     }
   }
 
+  /// 息屏保活 / 全局省电 settings; null without the native side.
+  Future<PhoneKeepAlivePrefs?> keepAlivePrefs() => _keepAlive('keepAlivePrefs');
+
+  /// Writes what is given (the rest stays); the native side applies it at once.
+  Future<PhoneKeepAlivePrefs?> setKeepAlivePrefs({
+    bool? keepAliveEnabled,
+    bool? keepAliveEconomy,
+    bool? globalPowerSaver,
+  }) => _keepAlive('setKeepAlivePrefs', {
+    'keepAliveEnabled': ?keepAliveEnabled,
+    'keepAliveEconomy': ?keepAliveEconomy,
+    'globalPowerSaver': ?globalPowerSaver,
+  });
+
+  Future<PhoneKeepAlivePrefs?> _keepAlive(String method, [Object? args]) async {
+    try {
+      final map = await _methods.invokeMapMethod<Object?, Object?>(method, args);
+      return map == null ? null : PhoneKeepAlivePrefs.fromMap(map);
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
   /// The 悬浮条 settings; null without the native side.
   Future<PhoneOverlayPrefs?> overlayPrefs() => _overlay('overlayPrefs');
 
@@ -1603,6 +1889,17 @@ class PhoneChannel {
     try {
       final map = await _methods.invokeMapMethod<Object?, Object?>(method, args);
       return map == null ? null : PhoneOverlayPrefs.fromMap(map);
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<PhoneBallPrefs?> _ball(String method, [Object? args]) async {
+    try {
+      final map = await _methods.invokeMapMethod<Object?, Object?>(method, args);
+      return map == null ? null : PhoneBallPrefs.fromMap(map);
     } on MissingPluginException {
       return null;
     } on PlatformException {
@@ -1652,4 +1949,15 @@ class PhoneChannel {
       return PhoneResult(false, e.message ?? e.code);
     }
   }
+}
+
+/// `shellGuardCategories` as {kind: allowed}; unknown shapes mean "all on".
+Map<String, bool> _shellGuardCategories(Object? raw) {
+  if (raw is Map) {
+    return {
+      for (final e in raw.entries)
+        if (e.key is String) e.key as String: e.value == true,
+    };
+  }
+  return const <String, bool>{};
 }

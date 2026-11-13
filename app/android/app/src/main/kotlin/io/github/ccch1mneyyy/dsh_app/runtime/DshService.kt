@@ -26,16 +26,50 @@ import io.github.ccch1mneyyy.dsh_app.phone.PhoneControl
 class DshService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var networkWatch: NetworkAccess.Watch? = null
     private var installSink: RuntimeController.EventSink? = null
     private var installPercent = -1
     private var installUpgrade = false
+    private val keepAliveHandler = Handler(Looper.getMainLooper())
+    private val keepAliveTick = object : Runnable {
+        override fun run() {
+            if (KeepAliveGuard.keepAliveEnabled(this@DshService)) {
+                KeepAliveGuard.startAsync(this@DshService, running)
+            }
+            keepAliveHandler.postDelayed(this, 60_000)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        live = this
+        // 息屏保活: hold the CPU from the moment the service exists, not only after a start command.
+        acquireWakeLock()
+        PowerSaver.refresh(this)
+        KeepAliveGuard.startAsync(this, isRunning)
+        // The channel may come up after this service: retry quietly once a minute.
+        keepAliveHandler.postDelayed(keepAliveTick, 60_000)
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // 息屏保活: swiping the app out of recents must not stop the engine or its notification.
+        // START_STICKY + the shell watchdog bring the service back if the system kills it anyway.
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        acquireWakeLock()
         val controller = RuntimeController.get(this)
+        // 息屏保活: while the engine is up the service is never left without its foreground
+        // notification, whichever command arrives (a stop may still take it down below).
+        if (running && intent?.action != ACTION_STOP) {
+            ensureChannel(this)
+            foreground(buildNotification(this, controller))
+        }
         when (intent?.action) {
             ACTION_INSTALL -> {
                 // First unpack or an upgrade: keep the process (and the CPU) up until it is done.
@@ -84,6 +118,8 @@ class DshService : Service() {
                         intent.getIntExtra(EXTRA_STOP_GENERATION, -1) else null
                     if (controller.stopProcess(expected)) {
                         running = false
+                        // The person stopped the engine on purpose: the watchdog must not restart it.
+                        KeepAliveGuard.onEngineStopped(this)
                         stopForegroundCompat()
                     }
                 }
@@ -93,6 +129,8 @@ class DshService : Service() {
                 val notification = buildNotification(this, controller)
                 foreground(notification)
                 running = true
+                // 息屏保活: the foreground notification and the wake lock stay for as long as the
+                // engine is up (released only in onDestroy), so the system cannot freeze us.
                 acquireWakeLock()
                 registerNetworkCallback(controller)
                 logBackgroundPolicy(controller)
@@ -101,11 +139,17 @@ class DshService : Service() {
         }
         // A newer accepted command may still be waiting for onStartCommand, including a no-op stop.
         if (!running && installSink == null) stopSelf(startId)
-        return START_NOT_STICKY
+        if (running) KeepAliveGuard.startAsync(this, true)
+        // 息屏保活: sticky so Android recreates the service after a kill; an explicit stop still stops it above.
+        return START_STICKY
     }
 
     override fun onDestroy() {
+        live = null
+        keepAliveHandler.removeCallbacks(keepAliveTick)
         running = false
+        // Deliberately not stopping the shell watchdog: outliving this service is its job.
+        KeepAliveGuard.onServiceDestroy()
         installSink?.let { RuntimeController.get(this).removeSink(it) }
         installSink = null
         networkWatch?.let { RuntimeController.get(this).onNetworkWatchStopped(it) }
@@ -166,8 +210,16 @@ class DshService : Service() {
     }
 
     private fun acquireWakeLock() {
+        // 保持后台运行 off: no privileged wake lock; the foreground service still keeps the engine
+        // up while the app is alive, which is the upstream behaviour this switch falls back to.
+        if (!KeepAliveGuard.keepAliveEnabled(this)) {
+            wakeLock?.let { if (it.isHeld) it.release() }
+            wakeLock = null
+            return
+        }
         if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        // No timeout: released only in onDestroy (or when 保持后台运行 is turned off).
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "dsh-app:runtime").apply {
             setReferenceCounted(false)
             acquire()
@@ -260,10 +312,18 @@ class DshService : Service() {
                 .setContentIntent(openApp(context, NOTIFICATION_ID))
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setPriority(Notification.PRIORITY_LOW)
                 .build()
 
         private val notificationMain = Handler(Looper.getMainLooper())
         @Volatile private var running = false
+        @Volatile private var live: DshService? = null
+
+        /** 保持后台运行 / 保活时省电 changed: re-evaluate the wake lock without restarting the engine. */
+        fun refreshKeepAlive(context: Context) {
+            live?.acquireWakeLock()
+        }
 
         /**
          * A line about the voice model download (texts come from Dart, in the app's language): shown
@@ -351,6 +411,8 @@ class DshService : Service() {
                 .setContentTitle(AppStrings.APP_NAME)
                 .setContentText(phoneLine ?: voice ?: text)
                 .setOngoing(true)
+                .setShowWhen(false)
+                .setPriority(Notification.PRIORITY_LOW)
                 .setContentIntent(open)
                 .addAction(Notification.Action.Builder(null, AppStrings.get(context, R.string.service_stop), stop).build())
                 .build()

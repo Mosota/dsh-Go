@@ -53,6 +53,19 @@ class AboutPage extends ConsumerWidget {
               ),
             ),
             SettingsTile(
+              icon: AppIcons.allFeatures,
+              title: 'Powered by DeepSeek',
+              subtitle: '本版基于官方版本修改',
+            ),
+            _authorLink(
+              context,
+              ref,
+              'about-author-home',
+              '修改版作者',
+              'https://github.com/Mosota',
+              'https://github.com/Mosota',
+            ),
+            SettingsTile(
               spot: Spots.licenses,
               onTap: () => showLicensePage(
                 context: context,

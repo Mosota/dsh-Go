@@ -89,6 +89,10 @@ String _firstLine(String text) {
 class _ThinkingPillState extends State<ThinkingPill> {
   bool _expanded = false;
 
+  /// 思考进行中被手动收起。以前 [active] 直接决定是否展开，点也收不起来；
+  /// 现在用户随时可以收，思考继续在后台跑。
+  bool _collapsedByUser = false;
+
   /// 收起动画期间还要画的那块内容:收起时它已经不该在树上了,但高度收回
   /// 去的过程里得先留着,不能啪地消失留下一块空白。
   Widget? _body;
@@ -112,7 +116,12 @@ class _ThinkingPillState extends State<ThinkingPill> {
   void didUpdateWidget(ThinkingPill oldWidget) {
     super.didUpdateWidget(oldWidget);
     // 一轮结束:过程收进摘要,亲手展开的全文也不留在外面。
-    if (oldWidget.streaming && !widget.streaming) _expanded = false;
+    if (oldWidget.streaming && !widget.streaming) {
+      _expanded = false;
+      _collapsedByUser = false;
+    }
+    // 新一轮思考开始:重新展开,否则上一轮收起后这一轮会一直不显示。
+    if (!oldWidget.streaming && widget.streaming) _collapsedByUser = false;
   }
 
   @override
@@ -129,8 +138,8 @@ class _ThinkingPillState extends State<ThinkingPill> {
     // 深色底上品牌蓝提一档亮度,图形才不发闷。
     final brand = dark ? Color.lerp(_brandBlue, Colors.white, 0.3)! : _brandBlue;
     final active = widget.active;
-    // 思考中或展开了全文:内容在下面,行内不再重复一行预览。
-    final open = active || _expanded;
+    // 思考中(未被手动收起)或展开了全文:内容在下面,行内不再重复一行预览。
+    final open = active ? !_collapsedByUser : _expanded;
     final preview = open ? '' : thinkingPreview(widget.reasoning);
     final detail = StreamRow.detail(context);
 
@@ -170,7 +179,7 @@ class _ThinkingPillState extends State<ThinkingPill> {
         ] else
           const Spacer(),
         const SizedBox(width: 4),
-        StreamChevron(open: _expanded),
+        StreamChevron(open: open),
       ],
     );
 
@@ -198,7 +207,8 @@ class _ThinkingPillState extends State<ThinkingPill> {
       _body = SmoothSize(
         // 流式思考的块高按行瞬长。高度再做一次动画会和文字上滑、列表追底叠在
         // 一起 —— 文字越快，看起来越像在上下抖。展开全文、收起时才要动画。
-        duration: active && !_expanded ? Duration.zero : AppMotion.of(context, AppMotion.quick),
+        // 流式思考块高按行瞬长；收起、展开都要动画,所以只在「活动且正展开」时为零。
+        duration: active && open ? Duration.zero : AppMotion.of(context, AppMotion.quick),
         alignment: AlignmentDirectional.topCenter,
         child: StreamThread(
           child: Padding(padding: const EdgeInsets.only(top: 4, bottom: 8), child: reasoningBody()),
@@ -212,8 +222,18 @@ class _ThinkingPillState extends State<ThinkingPill> {
       children: [
         Semantics(
           button: true,
-          expanded: _expanded,
-          child: StreamRowFrame(onTap: () => setState(() => _expanded = !_expanded), child: header),
+          // 语义跟真实的开合走(思考中被收起时,读屏也说"已收起")。
+          expanded: open,
+          child: StreamRowFrame(
+            onTap: () => setState(() {
+              if (active) {
+                _collapsedByUser = !_collapsedByUser;
+              } else {
+                _expanded = !_expanded;
+              }
+            }),
+            child: header,
+          ),
         ),
         // 一个槽:思考中是实时窗口,点开换成全文,一轮结束收起。
         ExpandReveal(open: open && !_windowHeld, child: _body ?? const SizedBox.shrink()),

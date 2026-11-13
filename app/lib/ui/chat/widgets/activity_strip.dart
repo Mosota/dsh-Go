@@ -1,6 +1,6 @@
 // The live "what is happening now" pill above the composer while a turn runs
 // (layer 1 of the run information): live status, the model's `⏵` narration,
-// rotating copy and easter eggs (see activity_copy.dart), and the turn clock.
+// and the turn clock. 不再有随机拟人短句:只留「在做什么」和「这一步多久」。
 
 import 'dart:async';
 
@@ -13,7 +13,6 @@ import '../../../state/chat_state.dart';
 import '../../../state/run_pulse.dart';
 import '../../pets/pet_perch.dart';
 import '../../theme/theme.dart';
-import '../activity_copy.dart';
 import '../run_info.dart';
 import 'live_clock.dart';
 import 'whale_tail.dart';
@@ -307,9 +306,8 @@ class _Line extends StatelessWidget {
     final dsh = DshColors.of(context);
     final a = activity;
 
-    // Three tiers: what (title, onSurface 600) › on what (detail, secondary)
-    // › colour (narration secondary, fun copy and the clock tertiary).
-    final flavor = stats != null ? null : activityFlavor(a, runClock());
+    // Two tiers: what it is doing (title, onSurface) › on what (detail,
+    // secondary) › the clock (tertiary). 不再有第三档的拟人化短句。
     final secondary = colors.onSurfaceVariant;
     final body = theme.textTheme.bodySmall?.copyWith(height: 1.3);
     final spans = <TextSpan>[
@@ -325,13 +323,6 @@ class _Line extends StatelessWidget {
             style: a.detailIsCode
                 ? AppType.mono(size: 12, color: secondary, height: 1.3)
                 : body?.copyWith(color: secondary),
-          ),
-        if (flavor != null)
-          TextSpan(
-            text: a.detail.isNotEmpty ? ' · ${flavor.text}' : flavor.text,
-            style: body?.copyWith(
-              color: flavor.source == FlavorSource.narration && a.detail.isEmpty ? secondary : dsh.textTertiary,
-            ),
           ),
       ],
     ];

@@ -36,6 +36,17 @@ interface PhoneEnv {
      * Cleanup may outlive the active Owner; it must never adopt a successor's resource.
      */
     fun beforeHandoff(screen: PhoneScreen, owner: PhoneTasks.Owner): String? = null
+    /** #153: run a command through the privileged channel; null while it is not usable. */
+    fun privilegedExec(cmd: String, timeoutMs: Int?, cwd: String?): Map<String, Any?>? = null
+    /** #153: one-shot device facts; null while the privileged channel is not usable. */
+    fun privilegedDump(): Map<String, Any?>? = null
+
+    /** Whether dangerous commands are refused before they reach the channel (user choice). */
+    fun shellGuard(): Boolean = true
+
+    /** Per-category consent: `uninstall` / `security` / `files` / `power`. */
+    fun shellGuardCategory(kind: String): Boolean = true
+
     fun sleep(ms: Long) = Thread.sleep(ms)
 }
 
@@ -379,6 +390,8 @@ class PhoneCore(
                 PhoneToolCatalog.TAP, PhoneToolCatalog.TYPE, PhoneToolCatalog.SCROLL, PhoneToolCatalog.TAP_XY -> act(name, a, scope, owner)
                 PhoneToolCatalog.KEY -> key(a, owner)
                 PhoneToolCatalog.HANDOFF -> handoff(a, scope, owner)
+                PhoneToolCatalog.SHELL -> shell(a)
+                PhoneToolCatalog.DEVICE -> device()
                 // l10n:keep agent tool result
                 else -> Out("没有这个手机工具：$name", error = true)
             }
@@ -389,6 +402,89 @@ class PhoneCore(
 
     private fun current(owner: PhoneTasks.Owner): Boolean =
         tasks.isCurrent(owner) && !Thread.currentThread().isInterrupted
+
+    // ── Privileged commands (#153) ──────────────────────────────────────────────────
+
+    /**
+     * Commands that destroy data, change security posture or take the device away from its owner
+     * are refused here and handed back to the person instead. The list is a second line of defence:
+     * the privileged channel itself already only accepts what this app asks it to run.
+     */
+    private val SHELL_DENY: List<Pair<String, Regex>> = listOf(
+        // 卸载 / 清数据
+        "uninstall" to Regex("""\bpm\s+(uninstall|clear|disable-user)"""),
+        "uninstall" to Regex("""\bpm\s+revoke"""),
+        // 改安全设置
+        "security" to Regex("""\bsettings\s+put\s+(secure|global)\s+"""),
+        "security" to Regex("""\bam\s+(force-stop\s+com\.android|broadcast.*BOOT_COMPLETED)"""),
+        // 删文件
+        "files" to Regex("""\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(/|/data|/system|/sdcard)\b"""),
+        "files" to Regex("""\bmkfs\."""),
+        "files" to Regex("""\bdd\s+if=.*\bof=/dev/"""),
+        "files" to Regex("""\bwipe\b"""),
+        // 关机 / 提权
+        "power" to Regex("""\breboot\b"""),
+        "power" to Regex("""\bsu\b"""),
+    )
+
+    private fun shell(a: Args): Out {
+        val cmd = a.text("cmd")?.trim().orEmpty()
+        // l10n:keep agent tool result
+        if (cmd.isEmpty()) return Out("需要 cmd：要执行的命令。", error = true, summary = "shell", decision = "invalid")
+        val guarded = env.shellGuard()
+        val hit = if (!guarded) null else SHELL_DENY.firstOrNull { (kind, re) ->
+            env.shellGuardCategory(kind) && re.containsMatchIn(cmd)
+        }?.second
+        if (hit != null) {
+            // l10n:keep agent tool result
+            return Out(
+                "这条命令会改动系统或删数据，被拒绝了：$cmd\n改用 handoff 让用户自己操作。",
+                error = true, summary = "shell", decision = "refused",
+            )
+        }
+        val result = env.privilegedExec(cmd, a.int("timeout_ms"), a.str("cwd"))
+            ?: return Out(env.backgroundUnavailable(), error = true, summary = "shell", decision = "unavailable")
+        if (result["ok"] != true) {
+            val reason = result["reason"] as? String
+            // l10n:keep agent tool result
+            return Out("特权通道执行失败：${reason ?: "未知原因"}", error = true, summary = "shell", decision = "error")
+        }
+        val rc = (result["rc"] as? Int) ?: -1
+        val out = (result["stdout"] as? String).orEmpty()
+        val err = (result["stderr"] as? String).orEmpty()
+        val truncated = result["truncated"] == true
+        val text = buildString {
+            // l10n:keep agent tool result
+            append("退出码 ").append(rc).append('\n')
+            if (out.isNotEmpty()) append(out.trimEnd())
+            if (err.isNotEmpty()) {
+                if (out.isNotEmpty()) append("\n")
+                // l10n:keep agent tool result
+                append("[stderr] ").append(err.trimEnd())
+            }
+            // l10n:keep agent tool result
+            if (out.isEmpty() && err.isEmpty()) append("（无输出）")
+            // l10n:keep agent tool result
+            if (truncated) append("\n…输出过长已截断")
+        }
+        return Out(text, error = rc != 0, summary = "shell", decision = if (rc == 0) "ok" else "nonzero")
+    }
+
+    private fun device(): Out {
+        val result = env.privilegedDump()
+            ?: return Out(env.backgroundUnavailable(), error = true, summary = "device", decision = "unavailable")
+        if (result["ok"] != true) {
+            val reason = result["reason"] as? String
+            // l10n:keep agent tool result
+            return Out("读取设备信息失败：${reason ?: "未知原因"}", error = true, summary = "device", decision = "error")
+        }
+        val text = (result["text"] as? String).orEmpty().ifEmpty {
+            // l10n:keep agent tool result
+            "没有读到设备信息。"
+        }
+        return Out(text, summary = "device", decision = "ok")
+    }
+
 
     private fun androidShell(a: Args, scope: SerialWorker.Scope, owner: PhoneTasks.Owner): Out {
         val request = PhoneAndroidShell.parse(a) ?: return Out(

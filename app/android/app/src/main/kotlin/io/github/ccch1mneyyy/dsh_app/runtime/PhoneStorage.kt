@@ -42,7 +42,7 @@ object PhoneStorage {
     fun binds(): List<String> {
         // Skip the mount rather than fail the launch when the path isn't readable.
         if (!java.io.File(hostRoot()).canRead()) return emptyList()
-        return listOf("${hostRoot()}:$GUEST_PATH", "/storage")
+        return listOf("${hostRoot()}:$GUEST_PATH", "/storage:/storage")
     }
 
     /** `/root/手机存储` → `/sdcard` inside the rootfs, present only while the mode is on. */

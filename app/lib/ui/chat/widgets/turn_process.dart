@@ -11,13 +11,16 @@ import '../../theme/theme.dart';
 import '../chat_rows.dart';
 import 'stream_row.dart';
 
-/// 一轮结束后收起的过程:一行安静的摘要,点开在下面按原样列出思考、
+/// 一轮的过程收成的一行:一行安静的摘要,点开在下面按原样列出思考、
 /// 工具调用和中间消息,左边一道细线表示"属于这一轮"([StreamThread])。
 ///
 /// ```
-/// ✓ 已完成 · 7 次工具调用 · 1 条消息  ⌄
+/// ✓ 已完成 · 7 步                    ⌄
 /// │ ⚛ 思考 · 先看 pubspec…
 /// │ ▣ 读取 · lib/main.dart
+/// ⚛ 思考中… · 3 步                   ⌄   ← 还在跑的轮,一样能点开
+/// ⊘ 已中断 · 2 步                    ⌄
+/// ⚠ 出错 · 4 步                      ⌄
 /// ```
 ///
 /// 用时不写在这里:回答下面的回合脚注已经有了。
@@ -50,14 +53,28 @@ class TurnProcess extends StatefulWidget {
   State<TurnProcess> createState() => _TurnProcessState();
 }
 
-/// 摘要:`已完成 · 12 次工具调用 · 2 条消息`;只有几段思考时 `已完成 · 3 段思考`。
+/// 这一轮的状态词:跑着 `思考中…`、正常结束 `已完成`、被停下 `已中断`、
+/// 出错 `出错`,其余(拦截、超长、崩溃收尾)`已停止`。
+String turnProcessStatus(TurnProcessRow row) {
+  final l10n = appL10n;
+  if (row.running) return '${l10n.chatThinkingActive}…';
+  final reason = row.trace.endReason;
+  if (reason == null || reason.isCompleted) return l10n.commonCompleted;
+  // 「出错」是状态词,比 l10n 里的「错误」更贴这一行;英文仍是 Error。
+  if (reason.isError) return AppLocale.isEnglish ? l10n.chatError : '出错';
+  if (reason.isAborted || reason.kind == 'interrupted') return l10n.chatInterrupted;
+  return l10n.commonStopped;
+}
+
+/// 摘要:`思考中… · 3 步` / `已完成 · 7 步`;一步都没有、只有几段思考时
+/// `已完成 · 3 段思考`。
 String turnProcessLabel(TurnProcessRow row) {
   final thoughts = row.rows.whereType<AssistantRow>().where((r) => r.item.reasoning.trim().isNotEmpty).length;
+  final steps = row.toolCalls + row.messages;
   return [
-    appL10n.commonCompleted,
-    if (row.toolCalls > 0) appL10n.chatTurnToolCalls(row.toolCalls),
-    if (row.messages > 0) appL10n.chatTurnMessages(row.messages),
-    if (row.toolCalls == 0 && row.messages == 0 && thoughts > 0) appL10n.chatTurnThoughts(thoughts),
+    turnProcessStatus(row),
+    if (steps > 0) appL10n.chatTurnSteps(steps),
+    if (steps == 0 && thoughts > 0) appL10n.chatTurnThoughts(thoughts),
   ].join(' · ');
 }
 
@@ -126,6 +143,35 @@ class _TurnProcessState extends State<TurnProcess> with SingleTickerProviderStat
     setState(() {});
   }
 
+  /// 标题前的状态图形:跑着转圈、结束 ✓、被停 ⊘、出错 ⚠。颜色跟着状态走
+  /// (出错用危险色,其余是过程行的三级色)。
+  Widget _statusGlyph(BuildContext context) {
+    final colors = DshColors.of(context);
+    if (widget.row.running) {
+      return SizedBox.square(
+        dimension: 18,
+        child: CircularProgressIndicator(strokeWidth: 2, strokeCap: StrokeCap.round, color: colors.textTertiary),
+      );
+    }
+    final reason = widget.row.trace.endReason;
+    final IconData icon;
+    final Color color;
+    if (reason == null || reason.isCompleted) {
+      icon = AppIcons.completed;
+      color = colors.textTertiary;
+    } else if (reason.isError) {
+      icon = AppIcons.error;
+      color = colors.danger;
+    } else if (reason.isAborted || reason.kind == 'interrupted') {
+      icon = AppIcons.blocked;
+      color = colors.textTertiary;
+    } else {
+      icon = AppIcons.stopped;
+      color = colors.textTertiary;
+    }
+    return Icon(icon, size: 18, color: color);
+  }
+
   /// 动画的每一帧(布局之前):在往上长的那段里,把长出来的高度从滚动
   /// 位置里扣掉。内容高度要等第一次布局后才知道,那之前先记着,帧后再补。
   void _holdHeader() {
@@ -166,7 +212,7 @@ class _TurnProcessState extends State<TurnProcess> with SingleTickerProviderStat
         onTap: _toggle,
         child: Row(
           children: [
-            StreamLead(child: Icon(AppIcons.completed, size: 18, color: DshColors.of(context).textTertiary)),
+            StreamLead(child: _statusGlyph(context)),
             const SizedBox(width: StreamRow.gap),
             Expanded(
               child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: StreamRow.label(context)),

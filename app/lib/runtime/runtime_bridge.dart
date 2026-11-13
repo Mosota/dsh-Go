@@ -717,6 +717,19 @@ class RuntimeBridge {
   /// Deletes the runtime with everything in /root except [keep].
   Future<void> reset({ResetKeep keep = const ResetKeep()}) => _methods.invokeMethod<void>('reset', {'keep': keep.wire});
 
+  /// 备份 /root/.dsh（会话、设置、技能、插件；不含 API key）→ 返回 zip 的绝对路径。
+  /// [password] 非空时，备份里的 API key 等敏感文件会用它加密（AES-GCM）。
+  Future<String?> backup({String? password}) async =>
+      await _methods.invokeMethod<String>('backup', {'password': ?password});
+
+  /// 这份备份里有没有加密的敏感文件（决定恢复时要不要问口令）。
+  Future<bool> backupHasSecrets(String path) async =>
+      await _methods.invokeMethod<bool>('backupHasSecrets', {'path': path}) ?? false;
+
+  /// 从 zip 覆盖恢复到 /root/.dsh（zip 里没有的文件保留不动）。
+  Future<bool> restore(String path, {String? password}) async =>
+      await _methods.invokeMethod<bool>('restore', {'path': path, 'password': ?password}) ?? false;
+
   Future<List<String>> logs({int lines = 500}) async =>
       (await _methods.invokeListMethod<String>('getLogs', {'lines': lines})) ?? const [];
 

@@ -67,6 +67,7 @@ enum SettingsPageId {
   phoneAppRules,
   phoneAndroidShell,
   phoneDnd,
+  phoneBall,
   phoneUnlocks,
   webSearch,
   media,
@@ -364,6 +365,14 @@ final _pages = <SettingsPageMeta>[
     parent: SettingsPageId.phone,
     keywords: (l) => l.searchKwDnd,
     condition: SpotCondition.phoneControlOn,
+  ),
+  SettingsPageMeta(
+    SettingsPageId.phoneBall,
+    title: (l) => l.phoneDndTitle,
+    parent: SettingsPageId.phone,
+    keywords: (l) => l.searchKwDnd,
+    condition: SpotCondition.phoneControlOn,
+    links: const ['ball'],
   ),
   SettingsPageMeta(
     SettingsPageId.phoneUnlocks,

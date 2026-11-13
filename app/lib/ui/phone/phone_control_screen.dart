@@ -10,9 +10,7 @@ import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
 import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
-import '../../state/phone_overlay_prefs.dart';
 import '../../state/phone_state.dart';
-import '../../state/phone_turn_end.dart';
 import '../common/app_sheet.dart';
 import '../common/app_dialog.dart';
 import '../common/ask_ai.dart';
@@ -32,7 +30,6 @@ import 'action_log_page.dart';
 import 'android_shell_page.dart';
 import 'a11y_restore_sheet.dart';
 import 'app_rules_page.dart';
-import 'dnd_mode_page.dart';
 import 'phone_disclosure_sheet.dart';
 import 'phone_background_guide.dart';
 import 'phone_unlock_page.dart';
@@ -498,13 +495,22 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
             ..._rules(state),
             gap,
             if (status.enabled) ...[
+              gap,
+              // 特权通道 / 虚拟屏 / 模型 shell 工具 已移到「设置 → 操控通道与工具」，
+              // 这里只留日常操控相关的东西。
               ListPageCard(
                 children: [
                   ListPageRow(
-                    icon: AppIcons.dndMode,
-                    spot: SettingsIndex.entry(SettingsPageId.phoneDnd),
-                    subtitle: dndSummary(status.background),
-                    onTap: () => _push(const PhoneDndPage()),
+                    icon: AppIcons.keepAlive,
+                    spot: SettingsIndex.entry(SettingsPageId.background),
+                    subtitle: l10n.phoneControlKeepAliveHint,
+                    onTap: () => _push(const BackgroundGuidePage()),
+                  ),
+                  ListPageRow(
+                    icon: AppIcons.backgroundPrompt,
+                    spot: Spots.phoneBackgroundGuide,
+                    subtitle: l10n.phoneBackgroundGuideSubtitle,
+                    onTap: _showBackgroundGuide,
                   ),
                 ],
               ),
@@ -521,7 +527,6 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
               ].any((spot) => spot.id == targetSpot),
               children: [
                 if (status.enabled) ...[
-                  _floatingBar(),
                   gap,
                   ListPageCard(
                     children: [
@@ -683,43 +688,6 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
     ];
   }
 
-  Future<void> _setReturn(bool on) => ref.read(phoneReturnPrefProvider.notifier).set(on);
-
-  Future<void> _setAutoCollapse(bool on) => ref.read(phoneOverlayPrefsProvider.notifier).setAutoCollapse(on);
-
-  /// 悬浮条: 闲置时不透明度, 闲置时自动收起, 完成后返回 dsh-go.
-  Widget _floatingBar() {
-    final overlay = ref.watch(phoneOverlayPrefsProvider);
-    final returnAfterDone = ref.watch(phoneReturnPrefProvider);
-    return ListPageCard(
-      title: context.l10n.phoneFloatingBar,
-      children: [
-        OverlayOpacityRow(
-          percent: overlay.percent,
-          onChanged: (p) => unawaited(ref.read(phoneOverlayPrefsProvider.notifier).setIdleOpacity(p / 100)),
-        ),
-        MergeSemantics(
-          child: ListPageRow(
-            icon: AppIcons.overlayBall,
-            spot: Spots.phoneAutoCollapse,
-            subtitle: context.l10n.phoneAutoCollapseHint,
-            onTap: () => unawaited(_setAutoCollapse(!overlay.autoCollapse)),
-            trailing: Switch(value: overlay.autoCollapse, onChanged: (v) => unawaited(_setAutoCollapse(v))),
-          ),
-        ),
-        MergeSemantics(
-          child: ListPageRow(
-            icon: AppIcons.returnToApp,
-            spot: Spots.phoneReturn,
-            subtitle: context.l10n.phoneReturnAfterDoneHint,
-            onTap: () => unawaited(_setReturn(!returnAfterDone)),
-            trailing: Switch(value: returnAfterDone, onChanged: (v) => unawaited(_setReturn(v))),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _localOcr(PhoneState state) {
     final enabled = state.policies?.localOcrEnabled;
     final l10n = context.l10n;
@@ -797,6 +765,61 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
             subtitle: phoneUnlockSummary(context.l10n, policies) ?? context.l10n.phoneControlLoading,
             onTap: () => _push(const PhoneUnlockPage()),
           ),
+        ],
+      ),
+      // 「悬浮条」设置卡已隐藏(它只在无障碍操控时出现,放在设置里只会让人
+      // 困惑;功能本身还在,见 phone_overlay_prefs 与 overlay 服务)。
+      const SizedBox(height: 24),
+      ListPageCard(
+        title: '息屏保活',
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Text(
+              'ColorOS 需要依次设置：\n'
+              '1. 设置 → 电池 → 应用耗电管理 → DSH Go → 允许后台运行\n'
+              '2. 应用 → 自启动 → 打开\n'
+              '3. 最近任务卡片下拉锁定',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                height: 1.6,
+              ),
+            ),
+          ),
+          if (state.background.ready)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Text(
+                '已通过特权通道加入系统白名单并启动守护进程。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: DshColors.of(context).textTertiary,
+                ),
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 24),
+      ListPageCard(
+        title: context.l10n.phoneControlRecentActions,
+        children: [
+          if (recent.isEmpty)
+            ListPageRow(
+              icon: AppIcons.history,
+              iconColor: DshColors.of(context).textTertiary,
+              title: context.l10n.phoneActionLogEmpty,
+              subtitle: context.l10n.phoneControlRecentActionsHint,
+            )
+          else ...[
+            for (final e in recent) ActionLogRow(e),
+            ListPageRow(
+              // Empty glyph slot: the words line up with the titles above.
+              leading: const SizedBox.shrink(),
+              title: context.l10n.phoneControlAllActions,
+              titleStyle: Theme.of(context).textTheme.bodyLarge
+                  ?.copyWith(fontSize: 15, height: 1.4, color: Theme.of(context).colorScheme.primary),
+              onTap: () => _push(const PhoneActionLogPage()),
+            ),
+          ],
         ],
       ),
     ];

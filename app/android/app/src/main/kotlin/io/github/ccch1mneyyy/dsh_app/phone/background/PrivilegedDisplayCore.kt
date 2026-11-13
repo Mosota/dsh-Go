@@ -51,10 +51,15 @@ import io.github.ccch1mneyyy.dsh_app.phone.VisualTargets
 import io.github.ccch1mneyyy.dsh_app.phone.selfcheck.TargetContract
 import io.github.ccch1mneyyy.dsh_app.phone.selfcheck.TargetFramePattern
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.lang.reflect.InvocationTargetException
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.RejectedExecutionException
@@ -210,6 +215,17 @@ class PrivilegedDisplayCore internal constructor(
                 response.putBoolean(Proto.OK, true)
                 return response
             }
+            // #153: the two ops that do not touch the virtual display at all.
+            if (op == Proto.OP_EXEC) {
+                execCommand(request, response)
+                if (!response.containsKey(Proto.ERROR)) response.putBoolean(Proto.OK, true)
+                return response
+            }
+            if (op == Proto.OP_DUMP) {
+                deviceDump(response)
+                if (!response.containsKey(Proto.ERROR)) response.putBoolean(Proto.OK, true)
+                return response
+            }
             lock.withLock {
                 targetReply = targetReply || targetSequence != null
                 selfCheckReply = selfCheckReply || selfCheckOwner
@@ -251,6 +267,177 @@ class PrivilegedDisplayCore internal constructor(
         if (e is InputProbe.Failure) e.observation?.encode()
         else if (e is ResourceRecovery.Failure || e is Fault || e is TargetIdentity.Failure || e is InterruptedException || e is SecurityException) null
         else e.javaClass.simpleName
+
+    // ---- #153: generic command execution over the same channel -----------------
+
+    /**
+     * [Proto.OP_EXEC]: run [Proto.CMD] as this process's uid (shell) and return its output.
+     *
+     * The channel is already authenticated, already user-consented and already serialised by
+     * [PrivilegedChannel]; this only adds the execution primitive. The output comes back whole —
+     * [MAX_OUTPUT_CHARS] is only an out-of-memory guard, not a cap a real command meets — and the
+     * child is killed on timeout. A reply is a Bundle, which Binder limits to about a megabyte (and
+     * a String costs two bytes a char in a parcel), so above [SPILL_CHARS] the text is written to a
+     * file and the reply carries that path: the words are kept, never cut.
+     */
+    private fun execCommand(request: Bundle, response: Bundle) {
+        val cmd = request.getString(Proto.CMD).orEmpty()
+        if (cmd.isBlank()) throw Fault("invalidArguments")
+        val timeoutMs = request.getInt(Proto.TIMEOUT_MS, DEFAULT_EXEC_TIMEOUT_MS).coerceIn(1_000, MAX_EXEC_TIMEOUT_MS)
+        val cwd = request.getString(Proto.CWD)?.takeIf { it.startsWith("/") }
+        val process = try {
+            ProcessBuilder(listOf("/system/bin/sh", "-c", cmd))
+                .apply { if (cwd != null && File(cwd).isDirectory) directory(File(cwd)) }
+                .redirectErrorStream(false)
+                .start()
+        } catch (e: Throwable) {
+            throw Fault("execUnavailable")
+        }
+        try {
+            // Only the OOM guard ([MAX_OUTPUT_CHARS]) is a boundary here; whether the text fits a
+            // Bundle is decided when it goes into one ([putOutput]).
+            val capped = AtomicBoolean(false)
+            process.outputStream.close()
+            val out = StringBuilder()
+            val err = StringBuilder()
+            val outReader = Thread { if (drain(process.inputStream, out)) capped.set(true) }
+            val errReader = Thread { if (drain(process.errorStream, err)) capped.set(true) }
+            outReader.isDaemon = true; errReader.isDaemon = true
+            outReader.start(); errReader.start()
+            val finished = process.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                response.putString(Proto.ERROR, "execTimeout")
+                putOutput(response, out, err, capped.get())
+                return
+            }
+            outReader.join(2_000); errReader.join(2_000)
+            response.putInt(Proto.RC, process.exitValue())
+            putOutput(response, out, err, capped.get())
+        } finally {
+            runCatching { process.destroy() }
+        }
+    }
+
+    /** Reads [stream] into [into] whole; true only when [MAX_OUTPUT_CHARS] was reached. */
+    private fun drain(stream: java.io.InputStream, into: StringBuilder): Boolean {
+        var capped = false
+        try {
+            stream.bufferedReader().use { reader ->
+                val buffer = CharArray(8192)
+                while (true) {
+                    val n = reader.read(buffer)
+                    if (n <= 0) break
+                    var room = 0
+                    synchronized(into) {
+                        room = MAX_OUTPUT_CHARS - into.length
+                        if (room > 0) into.append(buffer, 0, minOf(n, room))
+                    }
+                    // Past the OOM guard: stop reading rather than grow without a limit.
+                    if (room <= 0) {
+                        capped = true
+                        break
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            // A closed stream after destroyForcibly() is expected.
+        }
+        return capped
+    }
+
+    /**
+     * [Proto.STDOUT] / [Proto.STDERR], whole. Over [SPILL_CHARS] the text goes to a file and the
+     * reply carries 「输出过大，已写入 <path>」: a Bundle that held it would be refused by Binder
+     * (TransactionTooLarge), and cutting it would drop words the command did produce.
+     */
+    private fun putOutput(response: Bundle, out: StringBuilder, err: StringBuilder, capped: Boolean) {
+        val total = out.length + err.length
+        if (total <= SPILL_CHARS) {
+            response.putString(Proto.STDOUT, if (capped) out.toString() + CAPPED_NOTE else out.toString())
+            response.putString(Proto.STDERR, err.toString())
+            return
+        }
+        val file = runCatching { spill(out, err) }.getOrNull()
+        if (file != null) {
+            response.putString(Proto.STDOUT, "输出过大，已写入 ${file.absolutePath}" + (if (capped) CAPPED_NOTE else ""))
+            response.putString(Proto.STDERR, "")
+            return
+        }
+        // Nowhere to write it: keep what fits and say exactly what was left out.
+        response.putString(Proto.STDOUT, out.take(KEEP_CHARS).toString() + "\n…输出过长（$total 字符），没有可写的临时目录，其余内容未能保留")
+        response.putString(Proto.STDERR, "")
+    }
+
+    /**
+     * The whole output in one stamped file under `shell-out/`, or null when this process may not
+     * write anywhere. The engine runs as shell (or root), not as the app, so the app's own cache is
+     * usually closed to it; the shell uid's temp then holds the file, and a later `shell` call reads
+     * it back under the same uid.
+     */
+    private fun spill(out: StringBuilder, err: StringBuilder): File? {
+        val dir = spillDir() ?: return null
+        val name = "shell-" + SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date()) + ".txt"
+        val file = File(dir, name)
+        file.bufferedWriter(Charsets.UTF_8).use { w ->
+            w.write(out.toString())
+            if (err.isNotEmpty()) {
+                w.write("\n[stderr]\n")
+                w.write(err.toString())
+            }
+        }
+        prune(dir)
+        return file
+    }
+
+    /** The first place this process can write: the app's cache, the shell uid's temp, the JVM's. */
+    private fun spillDir(): File? {
+        val candidates = ArrayList<File>(3)
+        runCatching { context.cacheDir?.let { candidates.add(File(it, "shell-out")) } }
+        candidates.add(File("/data/local/tmp", "dsh-shell-out"))
+        candidates.add(File(System.getProperty("java.io.tmpdir") ?: "/data/local/tmp", "shell-out"))
+        return candidates.firstOrNull { dir ->
+            runCatching { (dir.isDirectory || dir.mkdirs()) && dir.canWrite() }.getOrDefault(false)
+        }
+    }
+
+    /** Yesterday's spills go: the output is read once, not kept as a log of every command. */
+    private fun prune(dir: File) {
+        val now = System.currentTimeMillis()
+        runCatching {
+            dir.listFiles()?.forEach { if (now - it.lastModified() > SPILL_KEEP_MS) it.delete() }
+        }
+    }
+
+    /** [Proto.OP_DUMP]: one round trip for the device facts a model keeps asking for. */
+    private fun deviceDump(response: Bundle) {
+        val facts = linkedMapOf<String, String>()
+        fun put(key: String, value: String?) { value?.takeIf { it.isNotBlank() }?.let { facts[key] = it } }
+        put("sdk", Build.VERSION.SDK_INT.toString())
+        put("release", Build.VERSION.RELEASE)
+        put("fingerprint", Build.FINGERPRINT)
+        put("manufacturer", Build.MANUFACTURER)
+        put("model", Build.MODEL)
+        put("uid", Process.myUid().toString())
+        put("shell", (Process.myUid() == Process.SHELL_UID).toString())
+        for ((key, cmd) in DUMP_COMMANDS) {
+            put(key, runCatching { shellLine(cmd, 6_000) }.getOrNull())
+        }
+        val storage = runCatching { privileged.getSystemService(android.os.storage.StorageManager::class.java) }.getOrNull()
+        runCatching {
+            storage?.primaryStorageVolume?.directory?.let { put("dataDir", it.absolutePath) }
+        }
+        response.putString(Proto.STDOUT, facts.entries.joinToString("\n") { "${it.key}: ${it.value}" })
+        response.putInt(Proto.RC, 0)
+    }
+
+    private fun shellLine(cmd: String, timeoutMs: Int): String {
+        val process = ProcessBuilder(listOf("/system/bin/sh", "-c", cmd)).redirectErrorStream(true).start()
+        process.outputStream.close()
+        val text = process.inputStream.bufferedReader().readText()
+        if (!process.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)) process.destroyForcibly()
+        return text.trim()
+    }
 
     private fun dispatch(op: String?, request: Bundle, response: Bundle) {
         if (op == Proto.OP_ALLOCATE) {
@@ -297,6 +484,10 @@ class PrivilegedDisplayCore internal constructor(
             }
             return
         }
+        // 悬浮窗 预览 borrows whatever display a task already owns. Handled before the owner
+        // check and the package requirement: it takes no ownership, launches nothing, and never
+        // releases or recreates that display.
+        if (ownerId == Proto.OWNER_PREVIEW) return preview(op, request, response)
         requireTreeReady()
         if (selfCheckOwner || targetSequence != null) throw Fault("identityChanged")
         if (op == Proto.OP_REPLAY_NAVIGATION && hosted?.recovery != true)
@@ -754,6 +945,60 @@ class PrivilegedDisplayCore internal constructor(
         // No close here: RELEASE owns the same UI job, VD, readers and ATMS confirmation.
     }
 
+    // ---- 悬浮窗 预览: the read-only owner -----------------------------------
+
+    /**
+     * [Proto.OWNER_PREVIEW] reads and injects only: it never becomes [owner], and with no display
+     * running it answers `displayMissing` instead of creating one — so a preview poll can never
+     * disturb a task that starts (or has just ended) on the same channel.
+     */
+    private fun preview(op: String?, request: Bundle, response: Bundle) {
+        // Nothing running means nothing to preview: answer that instead of creating a display.
+        if (display == null || owner == null) throw Fault("displayMissing")
+        when (op) {
+            Proto.OP_OBSERVE -> previewObserve(request, response)
+            Proto.OP_TAP -> previewTap(request)
+            Proto.OP_SCROLL -> previewSwipe(request)
+            else -> throw Fault("invalidArguments")
+        }
+    }
+
+    /**
+     * One frame (or, without [Proto.WANT_IMAGE], just the display's size) from the borrowed
+     * display. Deliberately no tree read: the pixels are the person's own screen shown back to
+     * them, and a tree read would drop frames wherever it is unavailable — below API 34, or while
+     * a window of the target app can't be walked.
+     */
+    private fun previewObserve(request: Bundle, response: Bundle) {
+        response.putInt(Proto.DISPLAY_ID, displayId())
+        response.putInt(Proto.WIDTH, width)
+        response.putInt(Proto.HEIGHT, height)
+        response.putBoolean(Proto.PORTRAIT, height >= width)
+        response.putInt(Proto.COUNT, 0)
+        if (!request.getBoolean(Proto.WANT_IMAGE)) return
+        val shot = capture() ?: throw Fault("frameNotReady")
+        response.putByteArray(Proto.IMAGE_BYTES, shot.jpeg)
+        response.putString(Proto.IMAGE_MIME, "image/jpeg")
+    }
+
+    private fun previewTap(request: Bundle) {
+        val x = request.getInt(Proto.POINT_X, -1)
+        val y = request.getInt(Proto.POINT_Y, -1)
+        if (!insideDisplay(x, y)) throw Fault("invalidArguments")
+        injectTap(x, y, request.getBoolean(Proto.LONG))
+    }
+
+    private fun previewSwipe(request: Bundle) {
+        val x1 = request.getInt(Proto.POINT_X, -1); val y1 = request.getInt(Proto.POINT_Y, -1)
+        val x2 = request.getInt(Proto.POINT_X2, -1); val y2 = request.getInt(Proto.POINT_Y2, -1)
+        if (!insideDisplay(x1, y1) || !insideDisplay(x2, y2)) throw Fault("invalidArguments")
+        val duration = request.getInt(Proto.DURATION_MS, 300).coerceIn(50, 3_000)
+        injectSwipe(x1, y1, x2, y2, duration)
+    }
+
+    /** A coordinate outside the display would land on the main screen's own area. */
+    private fun insideDisplay(x: Int, y: Int): Boolean = x >= 0 && y >= 0 && x < width && y < height
+
     /** Test a real input receiver, not an empty display. Never launches or touches a user app. */
     private fun gateProbe(response: Bundle) {
         requireTreeReady()
@@ -777,10 +1022,20 @@ class PrivilegedDisplayCore internal constructor(
                     try { window.close(); selfCheckWindow = null } finally { probeDetail = window.failureDetail }
                 }
             }
-            response.putBoolean(Proto.INJECT_OK, injection.isSuccess)
-            injection.exceptionOrNull()?.let {
-                response.putString(Proto.INJECT_ERROR, failureCode(it))
-                (probeDetail ?: failureDetail(it))?.let { detail -> response.putString(Proto.ERROR_DETAIL, detail) }
+            val denied = injection.exceptionOrNull()
+            val windowDenied = denied is SecurityException || denied?.cause is SecurityException
+            // A ROM that forbids a shell-uid window (SecurityException while creating the
+            // probe's Presentation) tells us nothing about input delivery: report it as
+            // untested, so the channel is still usable for shell and virtual-screen work.
+            if (windowDenied && denied != null) {
+                response.putString(Proto.INJECT_UNVERIFIED, "windowDenied")
+                (probeDetail ?: failureDetail(denied))?.let { detail -> response.putString(Proto.ERROR_DETAIL, detail) }
+            } else {
+                response.putBoolean(Proto.INJECT_OK, injection.isSuccess)
+                injection.exceptionOrNull()?.let {
+                    response.putString(Proto.INJECT_ERROR, failureCode(it))
+                    (probeDetail ?: failureDetail(it))?.let { detail -> response.putString(Proto.ERROR_DETAIL, detail) }
+                }
             }
         } finally {
             releaseAll()
@@ -2141,6 +2396,39 @@ class PrivilegedDisplayCore internal constructor(
     }
 
     companion object {
+        private const val DEFAULT_EXEC_TIMEOUT_MS = 30_000
+        private const val MAX_EXEC_TIMEOUT_MS = 300_000
+
+        /**
+         * The out-of-memory guard on [Proto.STDOUT] / [Proto.STDERR], per stream — ~8 MB each, far
+         * past any command a person asks for. Nothing is capped below it.
+         */
+        private const val MAX_OUTPUT_CHARS = 4_000_000
+
+        /**
+         * Above this the output goes to a file instead of the reply. Binder allows about 1 MB a
+         * transaction and a String takes two bytes a char in a parcel, so 512 KB of text is the
+         * honest ceiling — half of what a Bundle is allowed to carry.
+         */
+        private const val SPILL_CHARS = 512 * 1024 / 2
+
+        /** How much of an unwritable output still goes back, so the reply is not empty. */
+        private const val KEEP_CHARS = 64 * 1024
+
+        /** A spilled output is read once; older files go after a day. */
+        private const val SPILL_KEEP_MS = 24 * 60 * 60 * 1000L
+
+        private const val CAPPED_NOTE = "\n…输出超过 $MAX_OUTPUT_CHARS 个字符，其后未能保留"
+
+        /** What [Proto.OP_DUMP] reports; each value is the first line(s) of a shell command. */
+        private val DUMP_COMMANDS = listOf(
+            "battery" to "dumpsys battery | grep -E 'level|status|temperature' | head -3",
+            "display" to "wm size; wm density",
+            "storage" to "df -h /data /storage/emulated/0 | tail -2",
+            "network" to "dumpsys connectivity | grep -E 'Active default network' | head -1",
+            "packages" to "pm list packages | wc -l",
+        )
+
         private val PACKAGE = Regex("[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+")
         private val FLAG_NAMES = listOf(
             "PUBLIC", "OWN_CONTENT_ONLY", "SUPPORTS_TOUCH", "DESTROY_CONTENT_ON_REMOVAL",

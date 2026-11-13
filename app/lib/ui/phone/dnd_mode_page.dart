@@ -18,6 +18,7 @@ import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'phone_widgets.dart';
 import 'background_preview.dart';
+import 'ball_settings_page.dart';
 import 'restricted_settings_guide.dart' show RomFamily;
 
 /// Shizuku's own download page (official site).
@@ -44,6 +45,30 @@ String dndSummary(PhoneBackgroundStatus bg) {
     _ when bg.effectiveReady => l10n.phoneDndChannelReady(channel),
     _ => l10n.phoneDndChannelStatus(channel, bg.effectiveReason ?? l10n.phoneNotReadyYet),
   };
+}
+
+/// One-line state of the 特权通道 row: the channel both 虚拟屏 and the model's
+/// `shell` tool run on.
+String privilegedSummary(PhoneBackgroundStatus bg) {
+  if (!bg.androidOk) return appL10n.phoneDndRequiresAndroid;
+  final mode = bg.effectiveMode;
+  if (mode == PhonePrivilegedMode.off) return '未开启';
+  final label = mode.label(appL10n);
+  return bg.effectiveReady ? '$label · 已就绪' : '$label · ${bg.effectiveReason ?? appL10n.phoneNotReadyYet}';
+}
+
+/// Opens or closes 悬浮窗查看虚拟屏. Without 显示在其他应用上层 the window can't be added: the
+/// native side already opened the system switch, and this says what to turn on there.
+Future<PhoneResult> _toggleVscreenOverlay(BuildContext context, WidgetRef ref, bool open) async {
+  final phone = ref.read(phoneProvider.notifier);
+  final result = open ? await phone.openVscreenOverlay() : await phone.closeVscreenOverlay();
+  if (!context.mounted) return result;
+  if (!open || result.ok) return result;
+  final text = result.reasonCode == 'noOverlayPermission'
+      ? '请允许显示在其他应用上层'
+      : (result.reason ?? '悬浮窗打不开');
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  return result;
 }
 
 /// Group spacing: 24 between consecutive cards.
@@ -76,19 +101,65 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
   String? _error;
   late final AppLifecycleListener _lifecycle;
 
+  /// 悬浮窗查看虚拟屏: the window's own answer (`vscreenState().showing`), null until the
+  /// native side has said. It must read "off" after its ✕, whatever this run asked for.
+  bool? _overlay;
+  bool _syncing = false;
+
+  /// Set between a tap and the window having had time to be added: the poll must not race the
+  /// start and flip the switch back before the window is there.
+  bool _hold = false;
+
   PhoneController get _phone => ref.read(phoneProvider.notifier);
   bool get _ready => ref.read(phoneProvider).status.ready;
 
   @override
   void initState() {
     super.initState();
-    _lifecycle = AppLifecycleListener(onResume: () => unawaited(_phone.refreshStatus()));
+    _lifecycle = AppLifecycleListener(onResume: () {
+      unawaited(_phone.refreshStatus());
+      unawaited(_syncOverlay());
+    });
+    unawaited(_syncOverlay());
   }
 
   @override
   void dispose() {
     _lifecycle.dispose();
     super.dispose();
+  }
+
+  /// Takes the window's own state as the answer, not this run's last request.
+  Future<void> _syncOverlay() async {
+    if (!mounted || _syncing || _hold) return;
+    _syncing = true;
+    try {
+      final showing = await ref.read(phoneProvider.notifier).vscreenOverlayShowing();
+      if (!mounted) return;
+      ref.read(vscreenOverlayProvider.notifier).update(showing);
+      if (_overlay == showing) return;
+      setState(() => _overlay = showing);
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  Future<void> _toggleOverlay(bool open) async {
+    setState(() {
+      _overlay = open;
+      _hold = true;
+    });
+    final result = await _toggleVscreenOverlay(context, ref, open);
+    if (!mounted) return;
+    if (!open || !result.ok) setState(() => _overlay = false);
+    // The window is added asynchronously: let it settle, then take its own answer again.
+    unawaited(Future<void>.delayed(const Duration(milliseconds: 600), _releaseHold));
+  }
+
+  void _releaseHold() {
+    if (!mounted) return;
+    _hold = false;
+    unawaited(_syncOverlay());
   }
 
   void _toast(String text) {
@@ -238,6 +309,8 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
     final l10n = context.l10n;
     final status = ref.watch(phoneProvider.select((s) => s.status));
     final bg = status.background;
+    final runtime = ref.watch(vscreenOverlayProvider);
+    final overlay = _overlay ?? runtime;
     final hasSlotMetadata = _hasSlotMetadata(status);
     final previewTasks = _previewTasks(status);
     final using = bg.effectiveMode;
@@ -319,6 +392,39 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
             ],
           ),
         if (!bg.androidOk) PhoneNote(tone: NoteTone.warn, text: l10n.phoneDndUnsupported),
+        ListPageCard(
+          margin: _groupMargin,
+          children: [
+            ListPageRow(
+              icon: AppIcons.dndMode,
+              title: '虚拟屏',
+              subtitle: bg.vdisplayEnabled ? '开启：Agent 在虚拟屏上操作，不占用你的屏幕' : '已关闭：Agent 不再使用虚拟屏',
+              onTap: () => unawaited(_phone.setVdisplayEnabled(!bg.vdisplayEnabled)),
+              trailing: Switch(
+                value: bg.vdisplayEnabled,
+                onChanged: (v) => unawaited(_phone.setVdisplayEnabled(v)),
+              ),
+            ),
+            ListPageRow(
+              icon: AppIcons.dndMode,
+              title: '悬浮窗查看虚拟屏',
+              subtitle: '在任意界面浮一个小窗，能看也能点',
+              onTap: () => unawaited(_toggleOverlay(!overlay)),
+              trailing: Switch(
+                value: overlay,
+                onChanged: (v) => unawaited(_toggleOverlay(v)),
+              ),
+            ),
+            ListPageRow(
+              icon: AppIcons.overlayBall,
+              title: '悬浮球',
+              subtitle: '浮在任意界面上的小球：大小、不透明度、闲置半隐',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const PhoneBallSettingsPage()),
+              ),
+            ),
+          ],
+        ),
         if (using != PhonePrivilegedMode.off) ...[
           ListPageCard(
             margin: _groupMargin,

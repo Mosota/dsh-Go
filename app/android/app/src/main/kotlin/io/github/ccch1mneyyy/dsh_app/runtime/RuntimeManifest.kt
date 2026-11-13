@@ -68,7 +68,28 @@ data class RuntimeManifest(
             }
             val launch = json.optJSONObject("launch") ?: JSONObject()
             val argvJson = launch.optJSONArray("argv")
-            val argv = if (argvJson != null) List(argvJson.length()) { argvJson.getString(it) } else emptyList()
+            val raw = if (argvJson != null) List(argvJson.length()) { argvJson.getString(it) } else emptyList()
+            // proroot refuses a bind without a guest side ("bad bind format"), and a manifest that
+            // carries both an old and a new bind block would kill the engine outright. Drop the
+            // malformed pairs and any duplicate target here, once, for every launch.
+            val argv = ArrayList<String>(raw.size)
+            var i = 0
+            while (i < raw.size) {
+                val a = raw[i]
+                if (a == "-b" || a == "--bind") {
+                    val host = raw.getOrNull(i + 1)
+                    if (host == null || !host.contains(':')) {
+                        i += 2
+                        continue
+                    }
+                    if (argv.contains(host)) {
+                        i += 2
+                        continue
+                    }
+                    argv.add(a); argv.add(host); i += 2; continue
+                }
+                argv.add(a); i++
+            }
             val envJson = launch.optJSONObject("env") ?: JSONObject()
             val env = envJson.keys().asSequence().associateWith { envJson.getString(it) }
             return RuntimeManifest(
