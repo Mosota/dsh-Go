@@ -47,8 +47,7 @@ class DshService : Service() {
     override fun onCreate() {
         super.onCreate()
         live = this
-        // 息屏保活: hold the CPU from the moment the service exists, not only after a start command.
-        live = this
+        // 息屏保活: the CPU is held only while a task runs; idle leans on the shell watchdog.
         if (busy) acquireWakeLock() else releaseWakeLock()
         PowerSaver.refresh(this)
         KeepAliveGuard.startAsync(this, isRunning)
@@ -150,7 +149,6 @@ class DshService : Service() {
         keepAliveHandler.removeCallbacks(keepAliveTick)
         running = false
         // Deliberately not stopping the shell watchdog: outliving this service is its job.
-        live = null
         KeepAliveGuard.onServiceDestroy()
         installSink?.let { RuntimeController.get(this).removeSink(it) }
         installSink = null
@@ -243,10 +241,6 @@ class DshService : Service() {
     }
 
     companion object {
-        /** The running service, if any, so task activity can drive the wake lock. */
-        @Volatile
-        private var live: DshService? = null
-
         @Volatile
         private var busy = false
 
@@ -349,7 +343,8 @@ class DshService : Service() {
 
         /** 保持后台运行 / 保活时省电 changed: re-evaluate the wake lock without restarting the engine. */
         fun refreshKeepAlive(context: Context) {
-            live?.acquireWakeLock()
+            val svc = live ?: return
+            if (busy) svc.acquireWakeLock() else svc.releaseWakeLock()
         }
 
         /**
