@@ -311,6 +311,9 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
             "setShellAllowed" -> async(result) { control.setShellAllowed(call.argument<Boolean>("allowed") == true) }
             "shellAllowed" -> result.success(control.shellAllowed())
             "setShellGuard" -> async(result) { control.setShellGuard(call.argument<Boolean>("guard") == true) }
+            "setShellAskBeforeRun" -> async(result) {
+                control.setShellAskBeforeRun(call.argument<Boolean>("ask") == true)
+            }
             "setShellGuardCategory" -> async(result) {
                 val kind = call.argument<String>("kind").orEmpty()
                 control.setShellGuardCategory(kind, call.argument<Boolean>("allowed") == true)

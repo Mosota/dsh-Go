@@ -65,7 +65,7 @@ class PhoneToolSchemaTest {
         val json = checkNotNull(server.handle(Json.write(mapOf("jsonrpc" to "2.0", "id" to 1, "method" to "tools/list"))))
         val listed = ((Json.parse(json) as Map<*, *>)["result"] as Map<*, *>)["tools"] as List<*>
         assertEquals(PhoneToolCatalog.listJson(), listed)
-        assertEquals(listOf("android_shell", "apps", "open", "intent", "notify", "clipboard", "screen", "collect", "tap", "type", "scroll", "key", "tap_xy", "handoff"),
+        assertEquals(listOf("apps", "open", "intent", "notify", "clipboard", "screen", "collect", "tap", "type", "scroll", "key", "tap_xy", "handoff", "shell", "device"),
             listed.map { (it as Map<*, *>)["name"] })
         for (tool in listed) {
             val schema = (tool as Map<*, *>)["inputSchema"] as Map<*, *>

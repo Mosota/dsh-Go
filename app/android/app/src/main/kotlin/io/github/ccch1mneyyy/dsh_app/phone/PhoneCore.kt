@@ -44,8 +44,14 @@ interface PhoneEnv {
     /** Whether dangerous commands are refused before they reach the channel (user choice). */
     fun shellGuard(): Boolean = true
 
-    /** Per-category consent: `uninstall` / `security` / `files` / `power`. */
+    /** Per-category consent: `uninstall` / `security` / `files` / `power` / `camera` / `microphone` / `location`. */
     fun shellGuardCategory(kind: String): Boolean = true
+
+    /**
+     * D: ask the person before a command that hits one of those categories. Only consulted while
+     * [shellGuard] is off — with the guard on, a hit category is refused outright and never asked.
+     */
+    fun shellAskBeforeRun(): Boolean = false
 
     fun sleep(ms: Long) = Thread.sleep(ms)
 }
@@ -378,7 +384,6 @@ class PhoneCore(
             if (!current(owner)) return stoppedOut(name)
             if (call.replay != null) return replay(call, scope, owner)
             return when (name) {
-                PhoneToolCatalog.ANDROID_SHELL -> androidShell(a, scope, owner)
                 PhoneToolCatalog.APPS -> apps(a, owner)
                 PhoneToolCatalog.OPEN -> open(call, scope, owner)
                 PhoneToolCatalog.INTENT -> intent(call, scope, owner)
@@ -390,7 +395,7 @@ class PhoneCore(
                 PhoneToolCatalog.TAP, PhoneToolCatalog.TYPE, PhoneToolCatalog.SCROLL, PhoneToolCatalog.TAP_XY -> act(name, a, scope, owner)
                 PhoneToolCatalog.KEY -> key(a, owner)
                 PhoneToolCatalog.HANDOFF -> handoff(a, scope, owner)
-                PhoneToolCatalog.SHELL -> shell(a)
+                PhoneToolCatalog.SHELL -> shell(a, scope)
                 PhoneToolCatalog.DEVICE -> device()
                 // l10n:keep agent tool result
                 else -> Out("没有这个手机工具：$name", error = true)
@@ -425,22 +430,103 @@ class PhoneCore(
         // 关机 / 提权
         "power" to Regex("""\breboot\b"""),
         "power" to Regex("""\bsu\b"""),
+        // 摄像头: appops 改授权、pm grant/revoke CAMERA、camera 服务调用
+        "camera" to Regex("""\bappops\s+set\s+\S+\s+CAMERA\b"""),
+        "camera" to Regex("""\bpm\s+(grant|revoke)\b[^\n]*\bCAMERA\b"""),
+        "camera" to Regex("""\bservice\s+call\b[^\n]*\bcamera\b"""),
+        // 麦克风: appops 改 RECORD_AUDIO、pm grant/revoke、audio 服务调用
+        "microphone" to Regex("""\bappops\s+set\s+\S+\s+RECORD_AUDIO\b"""),
+        "microphone" to Regex("""\bpm\s+(grant|revoke)\b[^\n]*\bRECORD_AUDIO\b"""),
+        "microphone" to Regex("""\bservice\s+call\b[^\n]*\b(audio|microphone|mic)\b"""),
+        // 位置: appops 改 *LOCATION、pm grant/revoke *LOCATION
+        "location" to Regex("""\bappops\s+set\s+\S+\s+\S*LOCATION\S*"""),
+        "location" to Regex("""\bpm\s+(grant|revoke)\b[^\n]*\b\S*LOCATION\b"""),
     )
 
-    private fun shell(a: Args): Out {
+    /** 类别中文名：拒绝消息、确认框和页面用同一套说法。 */
+    private fun shellCategoryLabel(kind: String): String = when (kind) {
+        "uninstall" -> "卸载 / 清数据"
+        "security" -> "改安全设置"
+        "files" -> "删文件"
+        "power" -> "关机 / 提权"
+        "camera" -> "摄像头"
+        "microphone" -> "麦克风"
+        "location" -> "位置"
+        else -> "敏感"
+    }
+
+    /**
+     * D: one confirmation through the existing [UserGate] (NotificationGate / 无障碍确认), so the
+     * person sees the sentence and answers 允许 / 拒绝 / 停止. No new prompt mechanism is created,
+     * and the wait is charged to [SerialWorker.Scope.userWait] rather than to the call's budget.
+     */
+    private fun askShellOnce(cmd: String, kind: String, scope: SerialWorker.Scope): Decision {
+        val gate = env.gate() ?: return Decision.UNAVAILABLE
+        // l10n:keep agent tool result
+        val sentence = "允许模型以 shell 执行一条${shellCategoryLabel(kind)}类命令？\n$cmd"
+        return try {
+            scope.userWait {
+                gate.confirm(
+                    ConfirmRequest(
+                        sentence = sentence,
+                        appLabel = null,
+                        packageName = null,
+                        firstInApp = false,
+                        timeoutMs = 60_000,
+                    ),
+                )
+            }
+        } catch (stop: InterruptedException) {
+            Thread.currentThread().interrupt()
+            Decision.STOP
+        } catch (failure: Exception) {
+            Decision.UNAVAILABLE
+        }
+    }
+
+    private fun shell(a: Args, scope: SerialWorker.Scope): Out {
         val cmd = a.text("cmd")?.trim().orEmpty()
         // l10n:keep agent tool result
         if (cmd.isEmpty()) return Out("需要 cmd：要执行的命令。", error = true, summary = "shell", decision = "invalid")
-        val guarded = env.shellGuard()
-        val hit = if (!guarded) null else SHELL_DENY.firstOrNull { (kind, re) ->
-            env.shellGuardCategory(kind) && re.containsMatchIn(cmd)
-        }?.second
-        if (hit != null) {
+        // 判定顺序 — 拦截永远优先于询问:
+        //   拦截开 + 类别开（询问开关任意） → 直接拒绝
+        //   拦截开 + 类别关（询问开关任意） → 该类别放行
+        //   拦截关 + 询问开               → 命中任一类别时询问
+        //   拦截关 + 询问关               → 直接执行
+        val guardOn = env.shellGuard()
+        val kind = SHELL_DENY.firstOrNull { (_, re) -> re.containsMatchIn(cmd) }?.first
+        if (guardOn && kind != null && env.shellGuardCategory(kind)) {
             // l10n:keep agent tool result
             return Out(
-                "这条命令会改动系统或删数据，被拒绝了：$cmd\n改用 handoff 让用户自己操作。",
+                "这条命令属于「${shellCategoryLabel(kind)}」，被拦截规则拒绝了：$cmd\n" +
+                    "改用 handoff 让用户自己操作；确实需要时请用户关掉对应的拦截开关。",
                 error = true, summary = "shell", decision = "refused",
             )
+        }
+        if (!guardOn && kind != null && env.shellAskBeforeRun()) {
+            when (askShellOnce(cmd, kind, scope)) {
+                Decision.ALLOW_ONCE, Decision.ALLOW_APP_FOR_TASK, Decision.ALLOW_ALL_FOR_TASK,
+                Decision.ALLOW_VISUAL_FOR_TASK -> Unit
+
+                Decision.STOP -> return Out(
+                    // l10n:keep agent tool result
+                    "用户按了停止，这条命令没有执行：$cmd",
+                    error = true, summary = "shell", decision = "stopped",
+                )
+
+                Decision.DENY -> return Out(
+                    // l10n:keep agent tool result
+                    "用户拒绝了这条${shellCategoryLabel(kind)}类命令：$cmd\n不要重试或改写这条命令；需要时改用 handoff。",
+                    error = true, summary = "shell", decision = "refused",
+                )
+
+                Decision.UNAVAILABLE -> return Out(
+                    // l10n:keep agent tool result
+                    "没法向用户确认（确认通知不可用），这条命令没有执行：$cmd\n" +
+                        "请用户打开通知权限，或关掉「执行前询问」。",
+                    error = true, summary = "shell", decision = "needsConfirmation",
+                )
+            }
         }
         val result = env.privilegedExec(cmd, a.int("timeout_ms"), a.str("cwd"))
             ?: return Out(env.backgroundUnavailable(), error = true, summary = "shell", decision = "unavailable")
@@ -453,9 +539,14 @@ class PhoneCore(
         val out = (result["stdout"] as? String).orEmpty()
         val err = (result["stderr"] as? String).orEmpty()
         val truncated = result["truncated"] == true
+        // B: the identity the channel actually ran as comes first, so a wrong-uid surprise is visible.
+        val backend = (result["backend"] as? String) ?: "unknown"
+        val uid = (result["uid"] as? Number)?.toInt()
+        val uidName = (result["uidName"] as? String) ?: "?"
         val text = buildString {
             // l10n:keep agent tool result
-            append("退出码 ").append(rc).append('\n')
+            append("[backend=").append(backend).append(" uid=").append(uid ?: "?")
+                .append(' ').append(uidName).append("] 退出码 ").append(rc).append('\n')
             if (out.isNotEmpty()) append(out.trimEnd())
             if (err.isNotEmpty()) {
                 if (out.isNotEmpty()) append("\n")
@@ -485,24 +576,6 @@ class PhoneCore(
         return Out(text, summary = "device", decision = "ok")
     }
 
-
-    private fun androidShell(a: Args, scope: SerialWorker.Scope, owner: PhoneTasks.Owner): Out {
-        val request = PhoneAndroidShell.parse(a) ?: return Out(
-            Json.write(PhoneAndroidShell.failure("invalidArguments")), error = true)
-        // Arbitrary system effects cannot become an implicitly verified UI replay route.
-        skillTrace.markIncomplete(owner, PhoneTaskTrace.Gap.UNCERTAIN_RESULT)
-        val result = PhoneAndroidShell.run(request, owner, tasks, scope, env.androidShell(),
-            env::enabled, env::isLocked, env::gate, ui)
-        val successfulExit = when (val code = result["exitCode"]) {
-            is Int -> code == 0
-            is Long -> code == 0L
-            else -> false
-        }
-        val failed = result["started"] != true || result["errorCode"] != null ||
-            !successfulExit || result["timedOut"] == true || result["cancelled"] == true
-        return Out(Json.write(result), error = failed, summary = "Android Shell",
-            decision = (result["errorCode"] as? String) ?: if (failed) "failed" else "ok")
-    }
 
     // ── System actions ──────────────────────────────────────────────────────────────
 
@@ -545,12 +618,6 @@ class PhoneCore(
         var launch: SystemLaunch? = null
         var shareSubject: AppEntry? = null
         when (name) {
-            PhoneToolCatalog.ANDROID_SHELL -> {
-                if (PhoneAndroidShell.parse(a) == null) return Either.Left(Out(
-                    Json.write(PhoneAndroidShell.failure("invalidArguments")), error = true))
-                if (env.isLocked()) return Either.Left(Out(
-                    Json.write(PhoneAndroidShell.failure("locked")), error = true))
-            }
             PhoneToolCatalog.OPEN -> {
                 val appQ = a.str("app")
                 val url = a.str("url")
@@ -891,7 +958,7 @@ class PhoneCore(
                 listOf(PhoneScreen.MAIN, PhoneScreen.BACKGROUND) else listOf(PhoneScreen.MAIN))
             PhoneToolCatalog.SCREEN -> Either.Right(listOf(if (a.bool("background") == true) PhoneScreen.BACKGROUND else PhoneScreen.MAIN))
             // Arbitrary system commands take the main/global unknown-app lease, without reading a screen.
-            PhoneToolCatalog.INTENT, PhoneToolCatalog.ANDROID_SHELL -> Either.Right(listOf(PhoneScreen.MAIN))
+            PhoneToolCatalog.INTENT -> Either.Right(listOf(PhoneScreen.MAIN))
             PhoneToolCatalog.HANDOFF -> Either.Right(if (lastScreen == PhoneScreen.BACKGROUND)
                 listOf(PhoneScreen.MAIN, PhoneScreen.BACKGROUND) else listOf(PhoneScreen.MAIN))
             PhoneToolCatalog.TAP, PhoneToolCatalog.TYPE, PhoneToolCatalog.SCROLL, PhoneToolCatalog.TAP_XY,
@@ -1443,7 +1510,6 @@ class PhoneCore(
 
         /** The call's own time, not counting waits for the person. */
         fun budgetMs(tool: String): Long = when (tool) {
-            PhoneToolCatalog.ANDROID_SHELL -> 120_000L
             PhoneToolCatalog.APPS -> 15_000L
             PhoneToolCatalog.NOTIFY, PhoneToolCatalog.CLIPBOARD -> 10_000L
             PhoneToolCatalog.OPEN, PhoneToolCatalog.INTENT -> 25_000L

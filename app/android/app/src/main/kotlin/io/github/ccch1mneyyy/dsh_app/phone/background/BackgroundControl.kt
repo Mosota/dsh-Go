@@ -453,6 +453,8 @@ class BackgroundControl private constructor(context: Context) {
         val cached = gate.snapshot
         return mapOf(
             "mode" to PrivilegedPathPolicy.legacyMode(mode),
+            // B: 当前身份 for the shell page — `backend` is the raw selection (`sui` stays `sui`).
+            "shell" to identityForDisplay(),
             "vdisplayEnabled" to vdisplayEnabled,
             "ready" to PrivilegedPathPolicy.legacyReady(mode, reason == null),
             "reason" to PrivilegedPathPolicy.legacyReason(
@@ -909,9 +911,69 @@ class BackgroundControl private constructor(context: Context) {
 
     fun requestShizukuPermission(then: () -> Unit): Boolean = shizuku.requestPermission(then)
 
+    /**
+     * B: the identity the channel actually runs as. `id -u` / `id -un` run once per backend inside
+     * this same channel and are then cached, so the shell tool reports a measured UID and never a
+     * guess; a backend switch (`shizuku` → `sui`) re-probes instead of reusing the old value.
+     */
+    private data class ShellIdentity(val backend: String, val uid: Int, val name: String) {
+        fun toMap(): Map<String, Any?> = linkedMapOf(
+            "backend" to backend, "uid" to uid, "uidName" to name,
+        )
+    }
+
+    @Volatile private var shellIdentityCache: ShellIdentity? = null
+    @Volatile private var identityProbeAt = 0L
+
+    /** The raw selection, not `legacyMode`: the model must be able to tell `sui` from `shizuku`. */
+    private fun backendName(): String = mode
+
+    /**
+     * [priority] false rides the channel's preview path, which skips a channel that is busy with a
+     * real call — the status ticker must never queue behind a 300 s command for an `id -u`.
+     */
+    private fun identityProbe(ch: PrivilegedChannel, command: String, priority: Boolean): String? =
+        runCatching {
+            val request = Bundle().apply {
+                putString(Proto.OP, Proto.OP_EXEC)
+                putString(Proto.CMD, command)
+                putInt(Proto.TIMEOUT_MS, IDENTITY_TIMEOUT_MS)
+            }
+            val response: Bundle? = if (priority) ch.execute(request) else ch.tryExecute(request)
+            if (response?.getBoolean(Proto.OK) == true) response.getString(Proto.STDOUT)?.trim() else null
+        }.getOrNull()
+
+    /**
+     * Cached while the backend is unchanged; null when no probe ever succeeded — never a guess.
+     * A failed probe is retried at most every [IDENTITY_RETRY_MS], so the status ticker cannot
+     * hammer a broken channel with `id -u`.
+     */
+    private fun shellIdentity(ch: PrivilegedChannel?, priority: Boolean): ShellIdentity? {
+        val backend = backendName()
+        shellIdentityCache?.let { if (it.backend == backend) return it }
+        if (ch == null || !ch.alive()) return null
+        val now = System.currentTimeMillis()
+        if (now - identityProbeAt < IDENTITY_RETRY_MS) return null
+        identityProbeAt = now
+        val uid = identityProbe(ch, "id -u", priority)?.toIntOrNull() ?: return null
+        val name = identityProbe(ch, "id -un", priority)?.takeIf { it.isNotEmpty() && it.length <= 32 }
+            ?: if (uid == 0) "root" else "shell"
+        return ShellIdentity(backend, uid, name).also { shellIdentityCache = it }
+    }
+
+    /** The `shell` sub-map of `background`: the page shows it as 当前身份. Never opens a channel. */
+    fun identityForDisplay(): Map<String, Any?> {
+        val known = shellIdentity(channel?.takeIf { it.alive() }, priority = false)
+        return known?.toMap() ?: linkedMapOf("backend" to backendName())
+    }
+
     /** #153: run one command through the privileged channel (used by the `shell` tool). */
     fun exec(cmd: String, timeoutMs: Int?, cwd: String?): Map<String, Any?> {
-        val ch = activeChannel() ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_not_ready))
+        val ch = activeChannel() ?: return mapOf(
+            "ok" to false,
+            "backend" to backendName(),
+            "reason" to AppStrings.get(app, R.string.background_not_ready),
+        )
         val request = Bundle().apply {
             putString(Proto.OP, Proto.OP_EXEC)
             putString(Proto.CMD, cmd)
@@ -919,7 +981,13 @@ class BackgroundControl private constructor(context: Context) {
             if (cwd != null) putString(Proto.CWD, cwd)
         }
         val response = runCatching { ch.execute(request) }.getOrNull()
-            ?: return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_no_response))
+            ?: return mapOf(
+                "ok" to false,
+                "backend" to backendName(),
+                "reason" to AppStrings.get(app, R.string.background_no_response),
+            )
+        // Measured in the same channel that just ran the command, so a reconnected backend cannot lie.
+        val identity = shellIdentity(ch, priority = true)
         return mapOf(
             "ok" to response.getBoolean(Proto.OK),
             "rc" to response.getInt(Proto.RC),
@@ -927,6 +995,9 @@ class BackgroundControl private constructor(context: Context) {
             "stderr" to response.getString(Proto.STDERR).orEmpty(),
             "truncated" to response.getBoolean(Proto.TRUNCATED),
             "reason" to response.getString(Proto.ERROR),
+            "backend" to identity?.backend,
+            "uid" to identity?.uid,
+            "uidName" to identity?.name,
         )
     }
 
@@ -1733,6 +1804,12 @@ class BackgroundControl private constructor(context: Context) {
 
         /** Startup re-connect waits this long so the splash is never held by Shizuku. */
         private const val WARM_DELAY_MS = 2_500L
+
+        /** B: `id -u` / `id -un` are one round trip each; a hung channel must not hold the call. */
+        private const val IDENTITY_TIMEOUT_MS = 4_000
+
+        /** A failed identity probe waits this long before the status ticker tries again. */
+        private const val IDENTITY_RETRY_MS = 15_000L
 
         /** `reasonCode` of a preview request with no display (or no channel) to read. */
         const val NO_DISPLAY = "noDisplay"

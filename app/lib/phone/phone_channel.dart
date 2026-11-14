@@ -322,6 +322,36 @@ class BackgroundParallelism {
   }
 }
 
+/// B: the identity the privileged channel actually runs as, measured natively with `id -u`.
+/// `backend` is the raw selection (`shizuku` / `sui` / `adb` / `root`); [uid] is null until the
+/// native side has actually probed it, never a guess from the backend name.
+class PhoneShellIdentity {
+  const PhoneShellIdentity({this.backend, this.uid, this.uidName});
+
+  factory PhoneShellIdentity.fromMap(Map<Object?, Object?> m) => PhoneShellIdentity(
+    backend: _text(m['backend']),
+    uid: _int(m['uid']),
+    uidName: _text(m['uidName']),
+  );
+
+  final String? backend;
+  final int? uid;
+  final String? uidName;
+
+  static const _labels = <String, String>{
+    'shizuku': 'Shizuku',
+    'sui': 'SUI',
+    'adb': '自连 ADB',
+    'root': 'root',
+  };
+
+  /// `Shizuku` / `SUI` / `自连 ADB` / `root`, or 未连接.
+  String get backendLabel => _labels[backend] ?? '未连接';
+
+  /// 当前身份：Shizuku · UID 2000 — UID is only shown once it was measured.
+  String get label => uid == null ? backendLabel : '$backendLabel · UID $uid';
+}
+
 class PhoneBackgroundStatus {
   const PhoneBackgroundStatus({
     this.mode = PhoneBackgroundMode.off,
@@ -339,6 +369,7 @@ class PhoneBackgroundStatus {
     this.gateCleanup,
     this.resourceRecovery,
     this.parallelism,
+    this.shell,
   });
 
   factory PhoneBackgroundStatus.fromMap(Map<Object?, Object?> m) => PhoneBackgroundStatus(
@@ -357,6 +388,7 @@ class PhoneBackgroundStatus {
     gateCleanup: PhoneGateCleanup.parse(m['gateCleanup']),
     resourceRecovery: PhoneResourceRecovery.parse(m['resourceRecovery']),
     parallelism: BackgroundParallelism.parse(m['parallelism']),
+    shell: m['shell'] == null ? null : PhoneShellIdentity.fromMap(_map(m['shell'])),
   );
 
   final PhoneBackgroundMode mode;
@@ -383,6 +415,9 @@ class PhoneBackgroundStatus {
   final PhoneGateCleanup? gateCleanup;
   final PhoneResourceRecovery? resourceRecovery;
   final BackgroundParallelism? parallelism;
+
+  /// B: 当前身份 for the shell page; null on older native modules (or before any probe).
+  final PhoneShellIdentity? shell;
 
   PhonePrivilegedMode get effectiveMode =>
       privileged?.mode ??
@@ -653,6 +688,7 @@ class PhoneStatus {
     this.enabled = false,
     this.shellAllowed = false,
     this.shellGuard = true,
+    this.shellAskBeforeRun = false,
     this.guardCategories = const {},
     this.bridgeListening = false,
     this.a11y = const PhoneA11yStatus(),
@@ -679,6 +715,7 @@ class PhoneStatus {
       enabled = false,
       shellAllowed = false,
       shellGuard = true,
+      shellAskBeforeRun = false,
       guardCategories = const {},
       bridgeListening = false,
       a11y = const PhoneA11yStatus(),
@@ -703,6 +740,7 @@ class PhoneStatus {
     enabled: _flag(m['enabled']),
     shellAllowed: _flag(m['shellAllowed']),
     shellGuard: m['shellGuard'] == null ? true : _flag(m['shellGuard']),
+    shellAskBeforeRun: _flag(m['shellAskBeforeRun']),
     guardCategories: _shellGuardCategories(m['shellGuardCategories']),
     bridgeListening: _flag(m['bridgeListening']),
     a11y: PhoneA11yStatus.fromMap(_map(m['a11y'])),
@@ -741,7 +779,12 @@ class PhoneStatus {
   /// Dangerous shell commands are refused before they reach the channel.
   final bool shellGuard;
 
-  /// Per-category consent under 拦截危险命令: uninstall / security / files / power.
+  /// Ask before running a command that hits one of [guardCategories]; only meaningful while
+  /// [shellGuard] is off — with the guard on a hit category is refused and never asked.
+  final bool shellAskBeforeRun;
+
+  /// Per-category consent under 拦截危险命令:
+  /// uninstall / security / files / power / camera / microphone / location.
   final Map<String, bool> guardCategories;
   final bool bridgeListening;
   final PhoneA11yStatus a11y;
@@ -769,7 +812,7 @@ class PhoneStatus {
   bool get anyTaskBusy => task.active || tasks.any((t) => t.active || t.pendingCalls > 0 || t.draining);
 
   PhoneStatus copyWith({bool? enabled, bool? ready, Object? error = _keepError,
-      bool? shellAllowed, bool? shellGuard}) => PhoneStatus(
+      bool? shellAllowed, bool? shellGuard, bool? shellAskBeforeRun}) => PhoneStatus(
     ready: ready ?? this.ready,
     error: identical(error, _keepError) ? this.error : error as String?,
     statusRevision: statusRevision,
@@ -777,6 +820,7 @@ class PhoneStatus {
     enabled: enabled ?? this.enabled,
     shellAllowed: shellAllowed ?? this.shellAllowed,
     shellGuard: shellGuard ?? this.shellGuard,
+    shellAskBeforeRun: shellAskBeforeRun ?? this.shellAskBeforeRun,
     guardCategories: guardCategories,
     bridgeListening: bridgeListening,
     a11y: a11y,
@@ -1652,6 +1696,10 @@ class PhoneChannel {
   Future<bool> shellAllowed() => _bool('shellAllowed');
 
   Future<bool> setShellGuard(bool guard) => _bool('setShellGuard', {'guard': guard});
+
+  /// D: ask before a guarded-category command; the native side ignores it while
+  /// [PhoneStatus.shellGuard] is on (the guard refuses first).
+  Future<bool> setShellAskBeforeRun(bool ask) => _bool('setShellAskBeforeRun', {'ask': ask});
 
   Future<bool> setShellGuardCategory(String kind, bool allowed) =>
       _bool('setShellGuardCategory', {'kind': kind, 'allowed': allowed});

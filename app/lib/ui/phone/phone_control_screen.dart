@@ -27,7 +27,6 @@ import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import 'action_log_page.dart';
-import 'android_shell_page.dart';
 import 'a11y_restore_sheet.dart';
 import 'app_rules_page.dart';
 import 'phone_disclosure_sheet.dart';
@@ -565,17 +564,6 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
                 gap,
                 _localOcr(state),
                 if (status.skills.available) ...[gap, PhoneSkillSection(status: status.skills)],
-                gap,
-                ListPageCard(
-                  children: [
-                    ListPageRow(
-                      key: const ValueKey('android-shell-entry'),
-                      icon: AppIcons.terminal,
-                      spot: SettingsIndex.entry(SettingsPageId.phoneAndroidShell),
-                      onTap: () => _push(const AndroidShellPage()),
-                    ),
-                  ],
-                ),
                 gap,
                 _recentActions(state),
               ],

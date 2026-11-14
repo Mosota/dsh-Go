@@ -397,6 +397,9 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
             "security" -> K_GUARD_SECURITY
             "files" -> K_GUARD_FILES
             "power" -> K_GUARD_POWER
+            "camera" -> K_GUARD_CAMERA
+            "microphone" -> K_GUARD_MICROPHONE
+            "location" -> K_GUARD_LOCATION
             else -> return true
         },
         true,
@@ -408,9 +411,24 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
             "security" -> K_GUARD_SECURITY
             "files" -> K_GUARD_FILES
             "power" -> K_GUARD_POWER
+            "camera" -> K_GUARD_CAMERA
+            "microphone" -> K_GUARD_MICROPHONE
+            "location" -> K_GUARD_LOCATION
             else -> return false
         }
         prefs.edit().putBoolean(key, allowed).apply()
+        emitStatus()
+        return true
+    }
+
+    /**
+     * D: only consulted while [shellGuard] is off. With the guard on a hit category is refused
+     * outright, so the page greys this switch out instead of asking twice.
+     */
+    override fun shellAskBeforeRun(): Boolean = prefs.getBoolean(K_SHELL_ASK, false)
+
+    fun setShellAskBeforeRun(ask: Boolean): Boolean {
+        prefs.edit().putBoolean(K_SHELL_ASK, ask).apply()
         emitStatus()
         return true
     }
@@ -911,11 +929,15 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
             "enabled" to isEnabled(),
             "shellAllowed" to shellAllowed(),
             "shellGuard" to shellGuard(),
+            "shellAskBeforeRun" to shellAskBeforeRun(),
             "shellGuardCategories" to linkedMapOf(
                 "uninstall" to shellGuardCategory("uninstall"),
                 "security" to shellGuardCategory("security"),
                 "files" to shellGuardCategory("files"),
                 "power" to shellGuardCategory("power"),
+                "camera" to shellGuardCategory("camera"),
+                "microphone" to shellGuardCategory("microphone"),
+                "location" to shellGuardCategory("location"),
             ),
             "skills" to skillsStatus(),
             "bridgeListening" to bridge.listening,
@@ -1189,10 +1211,14 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         private const val K_TCP_FALLBACK = "tcpFallback"
         private const val K_SHELL = "modelShell"
         private const val K_SHELL_GUARD = "shellGuard"
+        private const val K_SHELL_ASK = "shellAskBeforeRun"
         private const val K_GUARD_UNINSTALL = "shellGuard_uninstall"
         private const val K_GUARD_SECURITY = "shellGuard_security"
         private const val K_GUARD_FILES = "shellGuard_files"
         private const val K_GUARD_POWER = "shellGuard_power"
+        private const val K_GUARD_CAMERA = "shellGuard_camera"
+        private const val K_GUARD_MICROPHONE = "shellGuard_microphone"
+        private const val K_GUARD_LOCATION = "shellGuard_location"
         private const val CHANNEL_FIX = "dsh-phone-fix"
         private const val NOTIFY_FIX_ID = 4099
 

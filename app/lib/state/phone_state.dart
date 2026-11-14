@@ -332,6 +332,9 @@ class PhoneController extends Notifier<PhoneState> {
   Future<bool> setShellGuardCategory(String kind, bool allowed) =>
       _thenRefresh(_channel.setShellGuardCategory(kind, allowed));
 
+  /// 「执行前询问」: only meaningful while 拦截危险命令 is off (the guard refuses first).
+  Future<bool> setShellAskBeforeRun(bool ask) => _thenRefresh(_channel.setShellAskBeforeRun(ask));
+
   /// Refused before any channel call when the native side doesn't offer [mode].
   Future<PhoneResult> setPrivilegedMode(PhonePrivilegedMode mode) =>
       _ifSupported(mode, () => _channel.setPrivilegedMode(mode));
