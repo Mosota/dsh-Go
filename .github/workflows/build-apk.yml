@@ -7,7 +7,12 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
+      # 代码已迁到 Mosota/DSH-Go-Plus；这个仓库只保留签名密钥，
+      # 所以在这里构建、检出的是新仓库的代码，签名仍用本仓库的 secrets。
       - uses: actions/checkout@v4
+        with:
+          repository: Mosota/DSH-Go-Plus
+          ref: main
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
