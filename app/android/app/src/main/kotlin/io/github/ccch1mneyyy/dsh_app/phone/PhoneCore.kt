@@ -346,6 +346,22 @@ class PhoneCore(
     }
 
     private fun execute(name: String, a: Args, scope: SerialWorker.Scope, callOwner: AtomicReference<PhoneTasks.Owner?>, prepared: PreparedCall?): Out {
+        // shell / device 是「通道工具」，不是「操控手机」：它们只依赖特权通道与各自的开关，
+        // 不跟着手机操控任务的生命周期走。否则用户一停手机操控，正在跑的 shell 也会被判
+        // 「本轮手机操作已停止」——那正是把两者混在一起的后果。
+        if (name == PhoneToolCatalog.SHELL || name == PhoneToolCatalog.DEVICE) {
+            return try {
+                when (name) {
+                    PhoneToolCatalog.SHELL -> shell(a, scope)
+                    else -> device()
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                stoppedOut(name)
+            } catch (e: Exception) {
+                failedOut(name, e)
+            }
+        }
         val admitted = callOwner.get()
         val owner = admitted ?: when (val b = tasks.begin()) {
             is PhoneTasks.Begin.Refused -> return Out(b.message + "。", error = true, summary = name, decision = "stopped")
