@@ -48,7 +48,7 @@ class AboutPage extends ConsumerWidget {
               context,
               ref,
               'about-author-home',
-              '本版维护者',
+              '维护与改进',
               'https://github.com/Mosota',
               'https://github.com/Mosota',
             ),
