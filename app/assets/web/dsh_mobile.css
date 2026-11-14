@@ -1,0 +1,351 @@
+/* ============================================================
+   deepdive 手机版 UI 优化 v0.4
+   ------------------------------------------------------------
+   对照构建：@deepseek-ai/dsh-web-frontend 0.2.1-rc.2（dist/index.html、
+   dist/assets/index-BxpfOGf3.css）以及它所加载的
+   @deepseek-ai/dsh-client-ui-* 各包的 client.js。
+
+   ⚠️ 重要：聊天 UI 的类名不在 index-*.css 里。
+   index-*.css 只有启动/错误页（_boot_/_card_）。真正的聊天布局是
+   dsh-client-ui-conversation / -chat / -layout / -settings-general /
+   -tool / -jobs 在运行时注入的 CSS module，类名格式是
+   **`<hash>_<name>`**（例：`wSkVaW_header`、`uV2eYG_row`、
+   `VOzbGW_panel`），不是 `._name_hash_1`。所以：
+   - 名字唯一的组件用 `[class*="_name"]`（hash 变了仍命中）；
+   - 容易撞名（header/panel/content/frame）的布局用当前精确类名，
+     下次前端升级后按本文件开头的「类名清单」重新抓一遍。
+
+   本次核对到的真实类名（在对应包 client.js 中的出现次数）：
+     布局     pI_x6G_frame 17 / pI_x6G_sidebarCol 7 / pI_x6G_centerCol 5
+     会话     wSkVaW_body 2, wSkVaW_header 26, wSkVaW_scrollBody 8,
+              wSkVaW_composerSeat 8, wSkVaW_composerHero 2,
+              wSkVaW_tabs 3, wSkVaW_headerUtilities 4
+     输入栏   uV2eYG_root 2, uV2eYG_card 7, uV2eYG_input 14,
+              uV2eYG_row 3, uV2eYG_trailing 6, uV2eYG_modes 4,
+              uV2eYG_standardControls 3, uV2eYG_select 4,
+              uV2eYG_dock 3, uV2eYG_accessory 2
+     消息区   EvIC1a_scroll 4, EvIC1a_column 13, EvIC1a_toBottomSlot 3
+     消息操作 xzv4MW_actions 9, xzv4MW_timeStart 2, xzv4MW_timeEnd 2
+     设置     VOzbGW_panel 3, VOzbGW_nav 14, VOzbGW_navList 2,
+              VOzbGW_navTitle 2, VOzbGW_navCell 4, VOzbGW_content 2,
+              VOzbGW_header 2, VOzbGW_actions 2
+     工具卡   CY-8Ka_terminal 2, CY-8Ka_ioSection 4, CY-8Ka_ioText 3,
+              CY-8Ka_commandInput 2
+     后台任务 QsffPG_menu 4, QsffPG_trigger 9
+
+   历史教训（保留）：0.1.7 升级后旧版用 `._name_hash_1` 的 20 个选择器
+   全部 0 命中，整套适配静默失效；不要再写 Vite 哈希类名，
+   也不要用 `[class*="_name_"]`（本构建的 name 后面没有下划线）。
+   ============================================================ */
+
+:root {
+  /* 触摸友好：主要可点目标的最小高度 */
+  --ds-mobile-tap: 44px;
+  /* 鲸鱼蓝皮肤（与桌面版 deepdive 一致） */
+  --dsw-alias-brand-primary: #4D6BFE !important;
+  --dsw-alias-brand-primary-hover: #5B7CFF !important;
+  --dsw-alias-brand-primary-active: #3D5AE8 !important;
+}
+[data-ds-dark-theme] {
+  --dsw-alias-brand-primary: #4D6BFE !important;
+  --dsw-alias-brand-primary-hover: #5B7CFF !important;
+  --dsw-alias-brand-primary-active: #3D5AE8 !important;
+}
+
+/* ---------- 基础触摸优化 ---------- */
+button,
+[role="button"],
+summary,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 16px 防止聚焦时页面缩放 */
+textarea,
+input[type="text"],
+input[type="search"] {
+  font-size: 16px !important;
+}
+
+/* 触屏滚动条更细，且不占布局宽度（输入栏按钮重叠的根因之一） */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+}
+.wSkVaW_scrollBody,
+.EvIC1a_scroll {
+  scrollbar-gutter: auto !important;
+}
+
+/* ---------- 聊天区：正文扩宽、左右留白收紧 ---------- */
+@media (max-width: 760px) {
+  /* 侧栏在手机上由布局自己收成 rail；去掉桌面分栏的右边框，正文列不再被压 */
+  [class*="_sidebarCol"] {
+    border-right: 0 !important;
+  }
+  [class*="_centerCol"] {
+    min-width: 0 !important;
+  }
+  /* 输入栏两侧 clearance 默认 16 + 消息区再 +16 = 32，手机上白白吃掉宽度 */
+  .wSkVaW_body {
+    --dsh-composer-side-clearance: 4px;
+    --dsh-composer-dock-inset: 4px;
+  }
+  .EvIC1a_scroll {
+    padding: 12px 8px !important;
+  }
+  .EvIC1a_column {
+    max-width: 100% !important;
+  }
+  .EvIC1a_toBottomSlot {
+    padding-bottom: 8px;
+  }
+  /* 标题栏给左上角的三条杠/返回键让位 */
+  .wSkVaW_header {
+    min-height: 64px;
+    padding: 10px 12px 0 52px !important;
+  }
+  .wSkVaW_tabs {
+    gap: 20px;
+    margin-top: 6px;
+    padding-left: 0 !important;
+  }
+}
+
+/* ---------- 输入栏：不换行、按钮不压住输入框 ---------- */
+@media (max-width: 760px) {
+  .uV2eYG_root {
+    padding: 0 4px 4px !important;
+  }
+  .uV2eYG_card {
+    max-width: 100% !important;
+    border-radius: 18px !important;
+  }
+  .uV2eYG_input {
+    min-height: var(--ds-mobile-tap);
+    font-size: 16px !important;
+    line-height: 24px !important;
+    padding-left: 12px !important;
+  }
+  .uV2eYG_row {
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    padding: 2px 6px 6px !important;
+  }
+  .uV2eYG_trailing,
+  .uV2eYG_modes,
+  .uV2eYG_standardControls {
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    min-width: 0;
+  }
+  .uV2eYG_select {
+    max-width: 30vw !important;
+    font-size: 12px !important;
+  }
+  .uV2eYG_dock {
+    gap: 8px !important;
+  }
+  .uV2eYG_accessory {
+    padding: 8px 8px 0 !important;
+  }
+}
+
+/* ---------- 消息操作条：窄屏换行，时间不撑破 ---------- */
+@media (max-width: 640px) {
+  [class*="_timeStart"],
+  [class*="_timeEnd"] {
+    white-space: normal !important;
+  }
+  .xzv4MW_actions {
+    flex-wrap: wrap !important;
+    height: auto !important;
+    min-height: 28px;
+    row-gap: 2px;
+  }
+  .xzv4MW_timeStart,
+  .xzv4MW_timeEnd {
+    padding-right: 0 !important;
+  }
+}
+
+/* ---------- 设置：单栏（导航横排 + 内容全宽） ---------- */
+@media (max-width: 760px) {
+  .VOzbGW_panel {
+    flex-direction: column !important;
+    width: 100% !important;
+    max-width: calc(100vw - 16px) !important;
+    height: min(860px, calc(100vh - 24px)) !important;
+    border-radius: 16px !important;
+  }
+  .VOzbGW_nav {
+    width: auto !important;
+    flex: none !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 10px 8px 0 !important;
+    border-right: 0 !important;
+    overflow-x: auto !important;
+    scrollbar-width: none;
+  }
+  .VOzbGW_nav::-webkit-scrollbar,
+  .VOzbGW_navList::-webkit-scrollbar {
+    display: none;
+  }
+  .VOzbGW_navTitle {
+    display: none !important;
+  }
+  .VOzbGW_navList {
+    flex-direction: row !important;
+    gap: 4px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+  .VOzbGW_navCell {
+    flex: none !important;
+    width: auto !important;
+    white-space: nowrap;
+    height: var(--ds-mobile-tap) !important;
+    padding: 10px 12px !important;
+  }
+  .VOzbGW_content {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+  }
+  .VOzbGW_header {
+    height: auto !important;
+    padding: 12px 12px 8px 10px !important;
+  }
+  .VOzbGW_content p,
+  .VOzbGW_content li,
+  .VOzbGW_content dd,
+  .VOzbGW_content dt {
+    line-height: 1.7;
+  }
+}
+
+/* ---------- 工具卡 / 终端：长命令和输出不横向撑破 ---------- */
+@media (max-width: 760px) {
+  .CY-8Ka_terminal,
+  .CY-8Ka_ioSection,
+  .CY-8Ka_ioText,
+  .CY-8Ka_commandInput,
+  [class*="_terminalBody"],
+  [class*="_codeBody"] {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere;
+  }
+  .CY-8Ka_ioSection {
+    column-gap: 8px !important;
+    padding: 10px 12px !important;
+    box-sizing: border-box !important;
+  }
+}
+
+/* ---------- 表格：窄屏可横向滚动 ---------- */
+[class*="tableScroll"],
+.md-table-wide {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  padding-bottom: 0 !important;
+}
+
+/* ---------- 后台任务菜单：不超出屏幕 ---------- */
+@media (max-width: 640px) {
+  .QsffPG_menu {
+    left: auto !important;
+    right: 8px !important;
+    max-width: calc(100vw - 16px) !important;
+  }
+  .QsffPG_trigger {
+    min-height: var(--ds-mobile-tap) !important;
+  }
+}
+
+/* ---------- 触摸目标 ≥44px（只动主要控件，避免把密集图标撑变形） ---------- */
+@media (pointer: coarse) {
+  .VOzbGW_navCell,
+  .VOzbGW_actions button,
+  .uV2eYG_select,
+  .QsffPG_trigger,
+  .xzv4MW_actions button,
+  .uV2eYG_row button,
+  .uV2eYG_row [role="button"] {
+    min-height: var(--ds-mobile-tap) !important;
+  }
+  .uV2eYG_row button,
+  .uV2eYG_row [role="button"] {
+    min-width: 40px;
+  }
+}
+
+/* ---------- 横屏矮屏：字号收一档 ---------- */
+@media (max-height: 520px) and (orientation: landscape) {
+  html,
+  body {
+    font-size: 14.5px;
+  }
+  .wSkVaW_header {
+    min-height: 52px;
+    padding-top: 6px !important;
+  }
+}
+
+/* ---------- 插件按钮（mobile.js 注入，三条杠下方） ---------- */
+.dsh-mobile-plugin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #8b98a9);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.dsh-mobile-plugin-btn:active {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.08));
+  color: var(--dsw-alias-label-primary, #e6edf3);
+}
+.dsh-mobile-plugin-btn svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 1024px) {
+  .wSkVaW_headerUtilities [data-cordis-badge] {
+    position: fixed !important;
+    top: 52px !important;
+    left: 8px !important;
+    width: 32px !important;
+    height: 32px !important;
+    margin: 0 !important;
+    padding: 0 6px !important;
+    gap: 4px !important;
+    border-radius: 8px !important;
+    font-size: 12px !important;
+    z-index: 1000 !important;
+    background: transparent !important;
+  }
+  .wSkVaW_headerUtilities [data-cordis-badge] > span {
+    display: none !important;
+  }
+}

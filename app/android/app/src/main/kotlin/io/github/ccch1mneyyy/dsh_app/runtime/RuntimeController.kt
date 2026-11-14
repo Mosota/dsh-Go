@@ -501,6 +501,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
             try {
                 noteDns(GuestSetup.writeResolvConf(app, installer.rootfs), DnsConfigSource.START)
                 GuestSetup.writeNpmConfig(app, installer.rootfs)
+                GuestSetup.writeWebMobileCss(app, installer.rootfs)
                 val storage = pendingPhoneStorage && PhoneStorage.isGranted(app) && PhoneStorage.binds().isNotEmpty()
                 PhoneStorage.syncShortcut(installer.rootfs, storage)
                 // Phone control: bridge up and guest files written before DSH starts; off in safe mode.

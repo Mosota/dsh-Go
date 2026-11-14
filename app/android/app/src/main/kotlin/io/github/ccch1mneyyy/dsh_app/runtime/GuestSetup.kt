@@ -216,6 +216,37 @@ object GuestSetup {
         wrote
     }.getOrDefault(false)
 
+    /**
+     * The web UI's phone layout lives in the runtime's frontend bundle, which the APK cannot
+     * rebuild here. Its selectors age out whenever that bundle is rebuilt, so the copy shipped
+     * as an asset is written over it before every start.
+     */
+    fun writeWebMobileCss(context: Context, rootfs: File): Boolean = runCatching {
+        val bytes = context.assets.open("web/dsh_mobile.css").readBytes()
+        fun found(dir: File): File? {
+            if (!dir.isDirectory) return null
+            if (dir.name == "dist" && dir.parentFile?.name == "dsh-web-frontend") return dir
+            return null
+        }
+        val candidates = mutableListOf<File>()
+        for (base in listOf("opt/dsh/lib/node_modules", "usr/local/lib/node_modules", "opt/node/lib/node_modules")) {
+            val root = File(rootfs, base)
+            File(root, "@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist").let { if (it.isDirectory) candidates.add(it) }
+            File(root, "@deepseek-ai/dsh-web-frontend/dist").let { if (it.isDirectory) candidates.add(it) }
+            // A shallow search covers layouts we did not name (pnpm stores, other prefixes).
+            runCatching {
+                root.walkTopDown().maxDepth(6).firstOrNull { it.name == "dsh-web-frontend" }?.let { f ->
+                    File(f, "dist").takeIf { it.isDirectory }?.let { candidates.add(it) }
+                }
+            }
+        }
+        val dist = candidates.firstOrNull() ?: return false
+        val target = File(dist, "mobile.css")
+        if (target.isFile && target.length() == bytes.size.toLong() && target.readBytes().contentEquals(bytes)) return false
+        target.writeBytes(bytes)
+        true
+    }.getOrDefault(false)
+
     fun writeResolvConf(rootfs: File, servers: List<String>): DnsConfigReport =
         writeResolvConf(rootfs, servers, Os::rename)
 
