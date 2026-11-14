@@ -757,7 +757,6 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
       ),
       // 「悬浮条」设置卡已隐藏(它只在无障碍操控时出现,放在设置里只会让人
       // 困惑;功能本身还在,见 phone_overlay_prefs 与 overlay 服务)。
-      const SizedBox(height: 24),
     ];
   }
 

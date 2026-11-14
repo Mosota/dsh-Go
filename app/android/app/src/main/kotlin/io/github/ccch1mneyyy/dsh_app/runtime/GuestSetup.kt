@@ -186,8 +186,35 @@ object GuestSetup {
         val network = addrs.filterNot(::unusable)
             .sortedBy { if (it is Inet4Address) 0 else 1 }
             .mapNotNull { it.hostAddress?.substringBefore('%') }.distinct().take(2)
-        return (network + FALLBACK_DNS).distinct().take(3)
+        // The device's own servers are only a supplement: on VPN/tether interfaces they are
+        // often addresses the guest cannot reach at all, which reads as ENOTFOUND inside.
+        return (FALLBACK_DNS + network).distinct().take(3)
     }
+
+    /**
+     * npm/pnpm inside the guest: the registry and proxy are written down, because a plugin
+     * install started by the engine does not always inherit the launch environment.
+     */
+    fun writeNpmConfig(context: Context, rootfs: File): Boolean = runCatching {
+        val spec = android.provider.Settings.Global.getString(context.contentResolver, "http_proxy")
+        val proxy = spec?.takeIf { it.isNotBlank() && it.contains(':') }
+            ?.let { "http://" + it.substringAfter("://", it).trim().trimEnd('/') }
+        val body = buildString {
+            appendLine("registry=https://registry.npmmirror.com/")
+            if (proxy != null) appendLine("proxy=$proxy")
+            if (proxy != null) appendLine("https-proxy=$proxy")
+            appendLine("fetch-retries=2")
+        }
+        var wrote = false
+        for (dir in listOf(File(rootfs, "root"), File(rootfs, "root/.dsh/profiles/web"))) {
+            if (!dir.isDirectory) continue
+            val f = File(dir, ".npmrc")
+            if (f.isFile && f.readText() == body) continue
+            f.writeText(body)
+            wrote = true
+        }
+        wrote
+    }.getOrDefault(false)
 
     fun writeResolvConf(rootfs: File, servers: List<String>): DnsConfigReport =
         writeResolvConf(rootfs, servers, Os::rename)
