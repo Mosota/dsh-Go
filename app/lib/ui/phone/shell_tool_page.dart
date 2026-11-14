@@ -51,6 +51,7 @@ class ShellToolPage extends ConsumerWidget {
               icon: Icons.terminal,
               title: '允许模型使用 shell 工具',
               subtitle: allowed ? '已允许：模型可以执行 dumpsys / pm / settings 这类命令' : '已禁止：模型拿不到 shell',
+              subtitleMaxLines: 3,
               onTap: () => unawaited(notifier.setShellAllowed(!allowed)),
               trailing: Switch(
                 value: allowed,
@@ -66,6 +67,7 @@ class ShellToolPage extends ConsumerWidget {
               icon: Icons.shield_outlined,
               title: '拦截危险命令',
               subtitle: guard ? '开启：下面命中的类别会被直接拒绝' : '已关闭：下面这些命令可以执行，风险自负',
+              subtitleMaxLines: 3,
               onTap: () => unawaited(notifier.setShellGuard(!guard)),
               trailing: Switch(
                 value: guard,
@@ -83,6 +85,7 @@ class ShellToolPage extends ConsumerWidget {
               ListPageRow(
                 title: label,
                 subtitle: hint,
+                subtitleMaxLines: 3,
                 onTap: guard
                     ? () => unawaited(
                           notifier.setShellGuardCategory(kind, !(status.guardCategories[kind] ?? true)),
@@ -117,6 +120,7 @@ class ShellToolPage extends ConsumerWidget {
               subtitle: guard
                   ? '拦截已开启：命中类别将直接拒绝，不会询问'
                   : '只对上面命中的命令询问，其余直接执行',
+              subtitleMaxLines: 3,
               onTap: guard ? null : () => unawaited(notifier.setShellAskBeforeRun(!ask)),
               trailing: Switch(
                 // 置灰但仍显示真实值：关掉拦截后这个开关立刻恢复原来的选择。

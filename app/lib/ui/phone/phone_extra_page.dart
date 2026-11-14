@@ -42,6 +42,34 @@ class PhoneExtraPage extends ConsumerWidget {
           ],
         ),
         ListPageCard(
+          title: '息屏保活',
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Text(
+                'ColorOS 需要依次设置：\n'
+                '1. 设置 → 电池 → 应用耗电管理 → DSH Go → 允许后台运行\n'
+                '2. 应用 → 自启动 → 打开\n'
+                '3. 最近任务卡片下拉锁定',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  height: 1.6,
+                ),
+              ),
+            ),
+            if (status.background.ready)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text(
+                  '已通过特权通道加入系统白名单并启动守护进程。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: DshColors.of(context).textTertiary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        ListPageCard(
           title: '工具',
           children: [
             ListPageRow(
