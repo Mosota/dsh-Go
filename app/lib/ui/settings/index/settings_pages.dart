@@ -18,6 +18,7 @@ import '../../phone/ball_settings_page.dart';
 import '../../phone/app_rules_page.dart';
 import '../../phone/dnd_mode_page.dart';
 import '../../phone/phone_control_screen.dart';
+import '../../phone/phone_extra_page.dart';
 import '../../phone/phone_unlock_page.dart';
 import '../../plugins/plugin_inventory_page.dart';
 import '../../plugins/plugins_screen.dart';
@@ -56,6 +57,9 @@ Widget settingsPage(SettingsPageId id, {String? sessionId}) => switch (id) {
   SettingsPageId.sharedLinks => const HostedLinksPage(),
   SettingsPageId.phone => const PhoneControlScreen(),
   SettingsPageId.phoneAppRules => const PhoneAppRulesPage(),
+  // The old standalone Android Shell page has no home of its own: searching for it lands on
+  // the unified channel-and-tools page, which is the only shell entry left.
+  SettingsPageId.phoneAndroidShell => const PhoneExtraPage(),
   SettingsPageId.phoneDnd => const PhoneDndPage(),
   SettingsPageId.phoneBall => const PhoneBallSettingsPage(),
   SettingsPageId.phoneUnlocks => const PhoneUnlockPage(),
