@@ -172,7 +172,18 @@ object GuestSetup {
 
     /** Up to two of the network's servers, IPv4 first, then the public fallbacks: three in all. */
     fun pickDns(addrs: List<InetAddress>): List<String> {
-        val network = addrs.filterNot { it.isLinkLocalAddress }
+        // Docker-ish ranges (172.16/12) show up on some VPN/tether interfaces and are not
+        // reachable from the guest: keeping them made every lookup fail with ENOTFOUND even
+        // when the phone itself had a working DNS. Only routable servers are kept.
+        fun unusable(a: InetAddress): Boolean {
+            if (a.isLinkLocalAddress || a.isLoopbackAddress || a.isAnyLocalAddress || a.isMulticastAddress) return true
+            val b = a.address
+            if (b.size != 4) return false
+            val x = b[0].toInt() and 0xff
+            val y = b[1].toInt() and 0xff
+            return x == 10 || (x == 172 && y in 16..31) || (x == 192 && y == 168)
+        }
+        val network = addrs.filterNot(::unusable)
             .sortedBy { if (it is Inet4Address) 0 else 1 }
             .mapNotNull { it.hostAddress?.substringBefore('%') }.distinct().take(2)
         return (network + FALLBACK_DNS).distinct().take(3)

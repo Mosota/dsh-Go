@@ -520,6 +520,24 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 val env = LinkedHashMap<String, String>()
                 env["TZ"] = java.util.TimeZone.getDefault().id
                 env.putAll(pendingEnv)
+                // The phone's own HTTP proxy is what reaches npm and git from the guest. Without
+                // it pnpm answers ENOTFOUND while the phone's browser works fine.
+                runCatching {
+                    val spec = android.provider.Settings.Global.getString(app.contentResolver, "http_proxy")
+                    if (!spec.isNullOrBlank() && spec.contains(':')) {
+                        val hostPort = spec.substringAfter("://", spec).trim().trimEnd('/')
+                        if (hostPort.isNotEmpty()) {
+                            val proxy = "http://$hostPort"
+                            for (key in listOf("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")) env[key] = proxy
+                            env["NO_PROXY"] = "localhost,127.0.0.1,::1"
+                            env["no_proxy"] = "localhost,127.0.0.1,::1"
+                            if (pendingEnv["HTTP_PROXY"] == null) log("[dsh-app] proxy from system settings: $proxy", "system")
+                        }
+                    }
+                }
+                // pnpm/npm inside the guest: default to the mirror that actually answers here.
+                env.putIfAbsent("npm_config_registry", "https://registry.npmmirror.com/")
+                env.putIfAbsent("NPM_CONFIG_REGISTRY", "https://registry.npmmirror.com/")
                 workspaceRecovery.applyEnvironment(env)
                 PerformancePolicy.applyEngineEnvironment(app, env, manifest.launchArgv, manifest.launchEnv)
                 if (safe) {
