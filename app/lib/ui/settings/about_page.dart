@@ -44,19 +44,6 @@ class AboutPage extends ConsumerWidget {
               spot: Spots.version,
               value: Text(version, style: AppType.tabular(theme.textTheme.bodyMedium!)),
             ),
-            const AppUpdateTiles(),
-            SettingsTile(
-              key: const ValueKey('settings-star'),
-              spot: Spots.star,
-              onTap: () => unawaited(
-                openStarProject(ProviderScope.containerOf(context, listen: false), ScaffoldMessenger.maybeOf(context)),
-              ),
-            ),
-            SettingsTile(
-              icon: AppIcons.allFeatures,
-              title: 'Powered by DeepSeek',
-              subtitle: '本版基于官方版本修改',
-            ),
             _authorLink(
               context,
               ref,
@@ -81,6 +68,7 @@ class AboutPage extends ConsumerWidget {
           title: l10n.hubAboutAuthor,
           children: [
             const SettingsTile(title: AppInfo.author),
+            const AppUpdateTiles(),
             _authorLink(
               context,
               ref,

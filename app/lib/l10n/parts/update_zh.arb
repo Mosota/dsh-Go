@@ -1,5 +1,5 @@
 {
-  "updateCheck": "检查更新",
+  "updateCheck": "检查上游更新",
   "updateAutoCheck": "自动检查更新",
   "updateAutoCheckDaily": "每天检查一次",
   "updateTileDownloading": "下载中",
