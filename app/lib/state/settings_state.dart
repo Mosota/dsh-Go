@@ -23,7 +23,8 @@ class AppSettings {
     this.chatSuggestions = true,
     this.hardwareEnterSends = false,
     this.chatTextScale = 1.0,
-    this.foldCompletedTurns = true,
+    // 整轮折叠是我们加的可选形态,默认关闭:聊天保持上游的逐行步骤。
+    this.foldCompletedTurns = false,
     this.visualReplies = true,
     this.customProviderIds = const {},
     this.loaded = false,
@@ -61,6 +62,8 @@ class AppSettings {
 
   /// A normally finished turn folds its thinking, tool calls and interim
   /// messages into one summary line above the answer (DSH Web's default).
+  /// Optional and **off by default**: the chat shows the upstream one-line-
+  /// per-step list instead (see chat_rows.dart).
   final bool foldCompletedTurns;
 
   /// Tell the local DSH it may answer with ```dsh-ui views (charts, cards,
@@ -131,6 +134,10 @@ class SettingsController extends Notifier<AppSettings> {
   static const _hardwareEnterKey = 'hardware_enter_sends';
   static const _chatTextScaleKey = 'chat_text_scale';
   static const _foldTurnsKey = 'fold_completed_turns';
+
+  /// 一次性迁移:旧默认是 true,已落盘的值也归零,保证升级后先看到逐行步骤;
+  /// 之后用户仍可在「设置 → 外观」里自己重新打开折叠。
+  static const _foldTurnsResetKey = 'fold_completed_turns_reset_v4';
   static const _visualRepliesKey = 'visual_replies';
   static const _secure = FlutterSecureStorage();
   late Future<void> _loaded;
@@ -163,6 +170,11 @@ class SettingsController extends Notifier<AppSettings> {
       // Same: the providers still work, only the self-heal copy is gone.
     }
     if (!ref.mounted) return;
+    if (!(prefs.getBool(_foldTurnsResetKey) ?? false)) {
+      await prefs.setBool(_foldTurnsKey, false);
+      await prefs.setBool(_foldTurnsResetKey, true);
+    }
+    if (!ref.mounted) return;
     state = AppSettings(
       apiKey: apiKey,
       themeMode: ThemeMode.values.firstWhere(
@@ -177,7 +189,7 @@ class SettingsController extends Notifier<AppSettings> {
       chatSuggestions: prefs.getBool(_chatSuggestionsKey) ?? true,
       hardwareEnterSends: prefs.getBool(_hardwareEnterKey) ?? false,
       chatTextScale: _knownScale(prefs.getDouble(_chatTextScaleKey)),
-      foldCompletedTurns: prefs.getBool(_foldTurnsKey) ?? true,
+      foldCompletedTurns: prefs.getBool(_foldTurnsKey) ?? false,
       visualReplies: prefs.getBool(_visualRepliesKey) ?? true,
       customProviderIds: providerIds,
       loaded: true,

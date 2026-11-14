@@ -87,7 +87,9 @@ String _firstLine(String text) {
 }
 
 class _ThinkingPillState extends State<ThinkingPill> {
-  bool _expanded = false;
+  /// 步骤行默认展开(用户点一下可以收起):聊天里每一步的内容直接可见,
+  /// 不再先给一行摘要、要再点一次才看得到。
+  bool _expanded = true;
 
   /// 思考进行中被手动收起。以前 [active] 直接决定是否展开，点也收不起来；
   /// 现在用户随时可以收，思考继续在后台跑。
@@ -115,9 +117,8 @@ class _ThinkingPillState extends State<ThinkingPill> {
   @override
   void didUpdateWidget(ThinkingPill oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 一轮结束:过程收进摘要,亲手展开的全文也不留在外面。
+    // 一轮结束:实时窗口换成全文;步骤行默认展开,不再收回摘要。
     if (oldWidget.streaming && !widget.streaming) {
-      _expanded = false;
       _collapsedByUser = false;
     }
     // 新一轮思考开始:重新展开,否则上一轮收起后这一轮会一直不显示。
@@ -140,7 +141,9 @@ class _ThinkingPillState extends State<ThinkingPill> {
     final active = widget.active;
     // 思考中(未被手动收起)或展开了全文:内容在下面,行内不再重复一行预览。
     final open = active ? !_collapsedByUser : _expanded;
-    final preview = open ? '' : thinkingPreview(widget.reasoning);
+    // 步骤行:一行「思考 · 首行摘要」,下面默认展开全文。摘要始终留着,
+    // 收起和展开都能一眼看出这段在想什么。
+    final preview = thinkingPreview(widget.reasoning);
     final detail = StreamRow.detail(context);
 
     final header = Row(
@@ -184,7 +187,9 @@ class _ThinkingPillState extends State<ThinkingPill> {
     );
 
     Widget reasoningBody() {
-      if (!_expanded) return ThinkingTicker(text: widget.reasoning);
+      // 思考进行中仍用三行实时窗口(固定高度,不跟着字数长);结束后默认给出
+      // 全文(步骤行默认展开)。用户手动收起后仍是窗口。
+      if (!_expanded || active) return ThinkingTicker(text: widget.reasoning);
       // 展开后,点正文本身和点头部一样收起。只在展开态挂这层手势:实时窗口
       // 还要能长按选字/随列表滚动,不该多一个点击目标。
       void collapse() => setState(() => _expanded = false);

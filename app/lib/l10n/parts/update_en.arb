@@ -1,6 +1,6 @@
 {
   "updateCheck": "Check upstream updates",
-  "updateAutoCheck": "Check automatically",
+  "updateAutoCheck": "Check for upstream updates automatically",
   "updateAutoCheckDaily": "Once a day",
   "updateTileDownloading": "Downloading",
   "updateTileDownloadingPercent": "Downloading {percent}%",

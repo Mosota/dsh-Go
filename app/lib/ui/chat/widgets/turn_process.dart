@@ -9,6 +9,7 @@ import '../../../l10n/l10n.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/theme.dart';
 import '../chat_rows.dart';
+import 'quiet_dots.dart';
 import 'stream_row.dart';
 
 /// 一轮的过程收成的一行:一行安静的摘要,点开在下面按原样列出思考、
@@ -53,19 +54,38 @@ class TurnProcess extends StatefulWidget {
   State<TurnProcess> createState() => _TurnProcessState();
 }
 
+/// 这一轮的状态:文字和图标**只认这一个判定**,避免两套规则各自为政
+/// (曾经文字写「已中断」、左边的图标却落到 ✓)。
+enum TurnProcessKind { running, completed, interrupted, error, stopped }
+
+/// 唯一的轮次状态判定:运行中、完成、被中断、出错、已停止。
+///
+/// 中断 / 停止 / 出错都排在「完成」前面;任何被停下、被停止或被插话切开
+/// 的轮都不会再渲染成 ✓。
+TurnProcessKind turnProcessKind(TurnProcessRow row) {
+  if (row.running) return TurnProcessKind.running;
+  final reason = row.trace.endReason;
+  // 被插话切开的那一片已经结束，不该再自称思考中。
+  if (row.cut != null && reason == null) return TurnProcessKind.interrupted;
+  if (reason == null) return TurnProcessKind.completed;
+  if (reason.isAborted || reason.kind == 'interrupted') return TurnProcessKind.interrupted;
+  // 「出错」是状态词,比 l10n 里的「错误」更贴这一行;英文仍是 Error。
+  if (reason.isError) return TurnProcessKind.error;
+  if (reason.isCompleted) return TurnProcessKind.completed;
+  return TurnProcessKind.stopped;
+}
+
 /// 这一轮的状态词:跑着 `思考中…`、正常结束 `已完成`、被停下 `已中断`、
 /// 出错 `出错`,其余(拦截、超长、崩溃收尾)`已停止`。
 String turnProcessStatus(TurnProcessRow row) {
   final l10n = appL10n;
-  if (row.running) return '${l10n.chatThinkingActive}…';
-  // 被插话切开的那一片已经结束，不该再自称思考中。
-  if (row.cut != null && row.trace.endReason == null) return l10n.chatInterrupted;
-  final reason = row.trace.endReason;
-  if (reason == null || reason.isCompleted) return l10n.commonCompleted;
-  // 「出错」是状态词,比 l10n 里的「错误」更贴这一行;英文仍是 Error。
-  if (reason.isError) return AppLocale.isEnglish ? l10n.chatError : '出错';
-  if (reason.isAborted || reason.kind == 'interrupted') return l10n.chatInterrupted;
-  return l10n.commonStopped;
+  return switch (turnProcessKind(row)) {
+    TurnProcessKind.running => '${l10n.chatThinkingActive}…',
+    TurnProcessKind.completed => l10n.commonCompleted,
+    TurnProcessKind.interrupted => l10n.chatInterrupted,
+    TurnProcessKind.error => AppLocale.isEnglish ? l10n.chatError : '出错',
+    TurnProcessKind.stopped => l10n.commonStopped,
+  };
 }
 
 /// 摘要:`思考中… · 3 步` / `已完成 · 7 步`;一步都没有、只有几段思考时
@@ -145,33 +165,18 @@ class _TurnProcessState extends State<TurnProcess> with SingleTickerProviderStat
     setState(() {});
   }
 
-  /// 标题前的状态图形:跑着转圈、结束 ✓、被停 ⊘、出错 ⚠。颜色跟着状态走
-  /// (出错用危险色,其余是过程行的三级色)。
+  /// 标题前的状态图形。状态只认 [turnProcessKind],和文字同一套判定:
+  /// 跑着是静止的三颗圆点(不转圈)、结束 ✓、被停 ⊘、出错 ⚠、其余 ⏹。
+  /// 颜色跟着状态走(出错用危险色,其余是过程行的三级色)。
   Widget _statusGlyph(BuildContext context) {
     final colors = DshColors.of(context);
-    if (widget.row.running) {
-      return SizedBox.square(
-        dimension: 18,
-        child: CircularProgressIndicator(strokeWidth: 2, strokeCap: StrokeCap.round, color: colors.textTertiary),
-      );
-    }
-    final reason = widget.row.trace.endReason;
-    final IconData icon;
-    final Color color;
-    if (reason == null || reason.isCompleted) {
-      icon = AppIcons.completed;
-      color = colors.textTertiary;
-    } else if (reason.isError) {
-      icon = AppIcons.error;
-      color = colors.danger;
-    } else if (reason.isAborted || reason.kind == 'interrupted') {
-      icon = AppIcons.blocked;
-      color = colors.textTertiary;
-    } else {
-      icon = AppIcons.stopped;
-      color = colors.textTertiary;
-    }
-    return Icon(icon, size: 18, color: color);
+    return switch (turnProcessKind(widget.row)) {
+      TurnProcessKind.running => QuietDots(color: colors.textTertiary),
+      TurnProcessKind.completed => Icon(AppIcons.completed, size: 18, color: colors.textTertiary),
+      TurnProcessKind.error => Icon(AppIcons.error, size: 18, color: colors.danger),
+      TurnProcessKind.interrupted => Icon(AppIcons.blocked, size: 18, color: colors.textTertiary),
+      TurnProcessKind.stopped => Icon(AppIcons.stopped, size: 18, color: colors.textTertiary),
+    };
   }
 
   /// 动画的每一帧(布局之前):在往上长的那段里,把长出来的高度从滚动

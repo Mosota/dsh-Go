@@ -482,6 +482,9 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
             title: l10n.phoneDndChangeChannel,
             children: choices,
           ),
+        // 两块折叠之间补上与其他卡一致的间距（普通卡是 12+12=24）：折叠头卡
+        // 自己不带外边距，紧挨着会贴成一片。
+        if (using != PhonePrivilegedMode.off) const SizedBox(height: 24),
         PhoneOptionsFold(
           key: const ValueKey('phone-dnd-options'),
           title: l10n.phoneControlAdvanced,

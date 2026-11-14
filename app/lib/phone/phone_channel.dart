@@ -885,7 +885,7 @@ class PhoneOverlayPrefs {
 
 // ── 息屏保活 / 全局省电 ──────────────────────────────────────────────────────
 
-/// 设置 → 操控通道与工具 → 保活 (`keepAlivePrefs` / `setKeepAlivePrefs`), plus
+/// 设置 → 特权通道与工具 → 保活 (`keepAlivePrefs` / `setKeepAlivePrefs`), plus
 /// 设置 → 性能 → 全局省电. Stored natively: DshService, the shell watchdog and the
 /// frame poll all read the same three keys.
 class PhoneKeepAlivePrefs {

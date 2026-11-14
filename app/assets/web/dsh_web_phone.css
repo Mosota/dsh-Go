@@ -43,6 +43,22 @@
 /* The main slot holds plugin pages and the official conversation. A subtree
    can keep its own geometry with data-dsh-adapt="off", including on html or
    main itself. Range/switch controls keep their authored track/thumb sizes. */
+
+/* System text autosizing (Android WebView widens text when a wide layout is
+   assumed) would break every line height and card in this layout: the page
+   is already laid out for the phone in dp. Keep it at 100%. */
+:root[data-dsh-app-layout] {
+  -webkit-text-size-adjust: 100% !important;
+  text-size-adjust: 100% !important;
+}
+
+/* Focused fields below 16px make mobile WebViews zoom the page on focus.
+   Keep a 16px floor without touching the authored size when it is larger.
+   Range/switch controls keep their own metrics. */
+:root[data-dsh-app-layout] :is(input, textarea, select):not([type="range"], [type="hidden"], [role="switch"], [role="slider"]) {
+  font-size: max(16px, 1em) !important;
+}
+
 @media (pointer: coarse) {
   :root[data-dsh-app-layout] [data-slot="main"] :is(button, [role="button"], select, input):not([role="switch"], [role="slider"], [type="range"], [type="hidden"], [hidden], [hidden] *, [data-dsh-adapt="off"], [data-dsh-adapt="off"] *) {
     min-width: 44px !important;

@@ -93,14 +93,13 @@ class ToolRow extends StatefulWidget {
 class _ToolRowState extends State<ToolRow> {
   ToolView? _view;
 
-  /// 用户点过之后的展开状态;没点过时按内容定:带原生卡片的默认展开
-  /// (结果到了、卡片出现时也随之展开),其余默认收起。
+  /// 用户点过之后的展开状态;没点过时步骤行默认展开(命令输出、文件改动
+  /// 直接可见),用户点一下可收起。带原生卡片的本来就要展开。
   bool? _toggled;
 
   ToolView get view => _view = ToolView.of(widget.item, _view);
 
-  bool _expandedFor(ToolView v) =>
-      _toggled ?? (widget.card == ToolCardPlacement.inline && (v.pluginView is DshUiParsed || v.media != null));
+  bool _expandedFor() => _toggled ?? widget.card == ToolCardPlacement.inline;
 
   @override
   Widget build(BuildContext context) {
@@ -122,7 +121,7 @@ class _ToolRowState extends State<ToolRow> {
         _ => const SizedBox.shrink(),
       };
     }
-    final expanded = _expandedFor(v);
+    final expanded = _expandedFor();
     final request = widget.item.pendingApproval;
     final auto = request != null && widget.autoAnswered.contains(request.eventId);
     final pending = auto ? null : request;
@@ -630,7 +629,8 @@ class ToolGroup extends StatefulWidget {
 }
 
 class _ToolGroupState extends State<ToolGroup> {
-  bool _expanded = false;
+  /// 步骤行默认展开:一组的每次调用直接可见,点一下可收起。
+  bool _expanded = true;
 
   /// 收起时露在外面的那一批:新来的调用和还在跑的。这一批都结束了也先
   /// 留着,下一批来了再平滑换掉,而不是先缩回去、再长出来。

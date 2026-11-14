@@ -8797,7 +8797,7 @@ class L10nZh extends L10n {
   String get hubTableTintNoneHint => '只剩网格线，最轻';
 
   @override
-  String get hubAbout => '关于 DSH Go';
+  String get hubAbout => '关于 DSH Go Plus';
 
   @override
   String get hubAboutAuthor => 'DSH Go 原作者';
@@ -10348,10 +10348,10 @@ class L10nZh extends L10n {
   String get phoneActionFailedLater => '没有成功，稍后再试';
 
   @override
-  String get phoneDndDisabled => '不打扰模式已关闭';
+  String get phoneDndDisabled => '虚拟屏已关闭';
 
   @override
-  String get phoneDndEnabled => '不打扰模式已启用';
+  String get phoneDndEnabled => '虚拟屏已启用';
 
   @override
   String get phoneDndShizukuPermissionFailed => '没有拿到授权。可以在 Shizuku 的「应用管理」里给 DSH Go 授权';
@@ -10360,7 +10360,7 @@ class L10nZh extends L10n {
   String get phoneDndPairedConnect => '配对成功，点「连接」';
 
   @override
-  String get phoneDndTitle => '不打扰模式';
+  String get phoneDndTitle => '虚拟屏';
 
   @override
   String get phoneDndSubtitle => '在看不见的屏幕上操作，不耽误你用手机';
@@ -11189,7 +11189,7 @@ class L10nZh extends L10n {
       'sui': '用 Sui 开启',
       'root': '用 Root 开启',
       'adb': '用自连 ADB 开启',
-      'other': '启用不打扰模式',
+      'other': '启用虚拟屏',
     });
     return '$_temp0';
   }
@@ -21405,10 +21405,10 @@ class L10nZh extends L10n {
   String get tavernGroupErrorHostInUse => '这个角色是一个群聊的群主，先删掉那个群聊';
 
   @override
-  String get updateCheck => '检查更新';
+  String get updateCheck => '检查上游更新';
 
   @override
-  String get updateAutoCheck => '自动检查更新';
+  String get updateAutoCheck => '自动检查上游更新';
 
   @override
   String get updateAutoCheckDaily => '每天检查一次';

@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../phone/phone_channel.dart';
 import 'phone_state.dart';
 
-/// 设置 → 操控通道与工具 → 保活, and 设置 → 性能 → 全局省电. The native side owns the
+/// 设置 → 特权通道与工具 → 保活, and 设置 → 性能 → 全局省电. The native side owns the
 /// three keys (DshService, the shell watchdog and the frame poll read them there), so the
 /// page shows a change at once and then takes the native answer.
 class KeepAlivePrefsController extends Notifier<PhoneKeepAlivePrefs> {

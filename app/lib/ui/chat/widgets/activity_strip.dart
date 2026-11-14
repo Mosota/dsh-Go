@@ -15,10 +15,11 @@ import '../../pets/pet_perch.dart';
 import '../../theme/theme.dart';
 import '../run_info.dart';
 import 'live_clock.dart';
+import 'quiet_dots.dart';
 import 'whale_tail.dart';
 
-/// 生成中,输入条正上方的一颗玻璃胶囊:鲸尾(游速 = 出字速度)+ 此刻在做
-/// 什么 + 一句自述或趣味文案 + 本轮用时,有待办时右端是进度。点一下看本轮
+/// 生成中,输入条正上方的一颗玻璃胶囊:三颗静止的活动圆点(浓淡 = 出字速度)
+/// + 此刻在做什么 + 一句自述或趣味文案 + 本轮用时,有待办时右端是进度。点一下看本轮
 /// 轨迹;长按几秒内换成这一步的用时和估算速度。
 ///
 /// ```
@@ -158,20 +159,20 @@ class ActivityStrip extends StatefulWidget {
 
   final RunActivity activity;
 
-  /// 鲸尾档位:0 等你,1–4 见 [SpeedGauge](见 [WhaleTail])。
+  /// 活动圆点的浓淡档位:0 等你,1–4 越来越实(静止,不做动画)。
   final int speedLevel;
 
   /// 长按时读一次当前估算速度。
   final double Function()? tokensPerSecond;
   final VoidCallback? onTap;
 
-  /// 鲸尾颜色;缺省是 DeepSeek 蓝(深色模式提亮),等你时是警示色。
+  /// 活动圆点的颜色;缺省是 DeepSeek 蓝(深色模式提亮),等你时是警示色。
   final Color? whaleColor;
 
   /// 右端的待办进度;聊天页上方有待办条时关掉,免得说两遍。
   final bool todoProgress;
 
-  /// 左端的鲸尾。宠物站在胶囊上时收起(位置一起收掉,左右内边距相等)。
+  /// 左端的三颗活动圆点。宠物站在胶囊上时收起(位置一起收掉,左右内边距相等)。
   final bool whale;
 
   /// 长按后统计显示多久。
@@ -228,8 +229,7 @@ class _ActivityStripState extends State<ActivityStrip> {
             duration: AppMotion.of(context, AppMotion.standard),
             curve: AppMotion.std,
             builder: (context, t, _) => Padding(
-              // 9 + whale: the tail's own air makes up the difference; without
-              // it both ends are 14.
+              // 9 + 圆点:图形列自己的留白补上差额;没有它时两端都是 14。
               padding: EdgeInsets.fromLTRB(14 - 5 * t, 6, 14, 6),
               child: Row(
                 children: [
@@ -243,9 +243,9 @@ class _ActivityStripState extends State<ActivityStrip> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // 自己一层:鲸尾每帧在动,不连累玻璃里的其余内容重绘。
+                              // 静止的三颗圆点:不驱动动画帧,也不抢文字的眼。
                               RepaintBoundary(
-                                child: WhaleTail(level: widget.speedLevel, color: whale, height: 20),
+                                child: QuietDots(level: widget.speedLevel, color: whale),
                               ),
                               const SizedBox(width: 6),
                             ],

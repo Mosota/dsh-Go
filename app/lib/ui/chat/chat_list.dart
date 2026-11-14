@@ -1202,6 +1202,8 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     final message = AssistantMessage(
       item: item,
       showActions: showActions,
+      // 过程里说给用户听的话(不是最终回答):正常正文 + 一道轻竖线。
+      midProcess: !item.isFinalAnswer && item.text.trim().isNotEmpty,
       onBranch: branchable ? () => _branch(item) : null,
       branching: _forkingId == item.id,
       onRegenerate: prompt == null ? null : () => _regenerate(item, prompt),

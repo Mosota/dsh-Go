@@ -52,6 +52,7 @@ class AssistantMessage extends StatefulWidget {
     this.regenerating = false,
     this.onQuote,
     this.footnote,
+    this.midProcess = false,
   });
 
   final AssistantChatItem item;
@@ -76,6 +77,11 @@ class AssistantMessage extends StatefulWidget {
 
   /// 回合脚注(这一轮在这条回复处结束),挂在操作行右端。
   final Widget? footnote;
+
+  /// 这一条是**过程里**的正文(不是最终回答):用正常正文排版,外加一道
+  /// 很轻的左侧竖线,让人在成串的思考/命令里一眼扫到模型说的话。
+  /// 步骤行(思考、运行、shell…)仍是次级样式,不受这里影响。
+  final bool midProcess;
 
   @override
   State<AssistantMessage> createState() => _AssistantMessageState();
@@ -179,6 +185,12 @@ class _AssistantMessageState extends State<AssistantMessage> {
     }
 
     final actions = widget.showActions && !streaming && text.isNotEmpty;
+    // 过程里的正文:正常正文排版(和最终回答同一套 markdown 与左右留白),
+    // 只在左侧留一道很轻的竖线当锚点,不做卡片。步骤行仍是次级样式。
+    Widget textBody = _textAfterThinking
+        ? _FirstTextIn(child: _markdown(text, streaming))
+        : _markdown(text, streaming);
+    if (widget.midProcess) textBody = _ProcessTextAnchor(child: textBody);
     final reply = HoldLift(
       behavior: HitTestBehavior.opaque,
       onLongPress: streaming || text.isEmpty ? null : () => _menu(text),
@@ -194,8 +206,7 @@ class _AssistantMessageState extends State<AssistantMessage> {
             ),
             if (text.isNotEmpty && !_textAfterThinking) const SizedBox(height: 8),
           ],
-          if (text.isNotEmpty)
-            _textAfterThinking ? _FirstTextIn(child: _markdown(text, streaming)) : _markdown(text, streaming),
+          if (text.isNotEmpty) textBody,
           if (item.interrupted) const _InterruptedMark(),
           // 一轮结束时和输入条上的胶囊同一节奏展开:胶囊收回多少,这里长出
           // 多少,回答不会先被顶上去再落回来。打开对话时已结束的轮直接展开。
@@ -449,4 +460,40 @@ class _StallDotState extends State<_StallDot> with SingleTickerProviderStateMixi
       ),
     );
   }
+}
+
+/// 过程里正文的轻锚点:在正文左侧的 gutter 里画一道 2dp 浅色竖线。
+///
+/// 画在负 x 上,正文本身不挪位——左右留白和最终回答完全一致;只多这一道
+/// 扫视时能看到的线。不做背景、不做卡片。
+class _ProcessTextAnchor extends StatelessWidget {
+  const _ProcessTextAnchor({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final line = Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.55);
+    return CustomPaint(painter: _AnchorRule(line), child: child);
+  }
+}
+
+class _AnchorRule extends CustomPainter {
+  const _AnchorRule(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.height <= 6) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    // 8dp 在正文左缘外的 gutter 里,和过程行的图形列错开。
+    canvas.drawLine(const Offset(-8, 2), Offset(-8, size.height - 2), paint);
+  }
+
+  @override
+  bool shouldRepaint(_AnchorRule oldDelegate) => oldDelegate.color != color;
 }

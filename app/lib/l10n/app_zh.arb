@@ -5457,7 +5457,7 @@
   "hubTableTintFillHint": "隔行淡一档，长表格更好扫读",
   "hubTableTintFollowHint": "表头浅底，表身跟随正文",
   "hubTableTintNoneHint": "只剩网格线，最轻",
-  "hubAbout": "关于 DSH Go",
+  "hubAbout": "关于 DSH Go Plus",
   "hubAboutAuthor": "DSH Go 原作者",
   "hubAboutBilibili": "B站主页",
   "hubAboutX": "X 主页",
@@ -6223,11 +6223,11 @@
   "phoneDndHiddenScreen": "在看不见的屏幕上操作",
   "phoneNotReadyYet": "还没准备好",
   "phoneActionFailedLater": "没有成功，稍后再试",
-  "phoneDndDisabled": "不打扰模式已关闭",
-  "phoneDndEnabled": "不打扰模式已启用",
+  "phoneDndDisabled": "虚拟屏已关闭",
+  "phoneDndEnabled": "虚拟屏已启用",
   "phoneDndShizukuPermissionFailed": "没有拿到授权。可以在 Shizuku 的「应用管理」里给 DSH Go 授权",
   "phoneDndPairedConnect": "配对成功，点「连接」",
-  "phoneDndTitle": "不打扰模式",
+  "phoneDndTitle": "虚拟屏",
   "phoneDndSubtitle": "在看不见的屏幕上操作，不耽误你用手机",
   "phoneDndUnsupported": "这台手机用不了：需要 Android 14 及以上。",
   "phoneDndRequirements": "使用条件",
@@ -6577,7 +6577,7 @@
       }
     }
   },
-  "phoneDndEnableWith": "{mode, select, shizuku{用 Shizuku 开启} sui{用 Sui 开启} root{用 Root 开启} adb{用自连 ADB 开启} other{启用不打扰模式}}",
+  "phoneDndEnableWith": "{mode, select, shizuku{用 Shizuku 开启} sui{用 Sui 开启} root{用 Root 开启} adb{用自连 ADB 开启} other{启用虚拟屏}}",
   "@phoneDndEnableWith": {
     "placeholders": {
       "mode": {
@@ -13139,8 +13139,8 @@
   "tavernGroupErrorInvalidLimit": "每轮至少要有一个人说话",
   "tavernGroupErrorInvalidOrder": "排的顺序和群里的成员对不上，请重新打开再排",
   "tavernGroupErrorHostInUse": "这个角色是一个群聊的群主，先删掉那个群聊",
-  "updateCheck": "检查更新",
-  "updateAutoCheck": "自动检查更新",
+  "updateCheck": "检查上游更新",
+  "updateAutoCheck": "自动检查上游更新",
   "updateAutoCheckDaily": "每天检查一次",
   "updateTileDownloading": "下载中",
   "updateTileDownloadingPercent": "下载中 {percent}%",

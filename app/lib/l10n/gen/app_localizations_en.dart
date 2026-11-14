@@ -9285,7 +9285,7 @@ class L10nEn extends L10n {
   String get hubTableTintNoneHint => 'Grid lines only, the lightest';
 
   @override
-  String get hubAbout => 'About DSH Go';
+  String get hubAbout => 'About DSH Go Plus';
 
   @override
   String get hubAboutAuthor => 'Original author of DSH Go';
@@ -10876,10 +10876,10 @@ class L10nEn extends L10n {
   String get phoneActionFailedLater => 'Couldn’t complete. Try again later.';
 
   @override
-  String get phoneDndDisabled => 'Non-disruptive mode is off';
+  String get phoneDndDisabled => 'Virtual screen is off';
 
   @override
-  String get phoneDndEnabled => 'Non-disruptive mode is on';
+  String get phoneDndEnabled => 'Virtual screen is on';
 
   @override
   String get phoneDndShizukuPermissionFailed =>
@@ -10889,7 +10889,7 @@ class L10nEn extends L10n {
   String get phoneDndPairedConnect => 'Paired. Tap “Connect”.';
 
   @override
-  String get phoneDndTitle => 'Non-disruptive mode';
+  String get phoneDndTitle => 'Virtual screen';
 
   @override
   String get phoneDndSubtitle => 'Works on a hidden screen while you use your phone';
@@ -22587,10 +22587,10 @@ class L10nEn extends L10n {
   String get tavernGroupErrorHostInUse => 'This character hosts a group chat; delete that chat first';
 
   @override
-  String get updateCheck => 'Check for updates';
+  String get updateCheck => 'Check upstream updates';
 
   @override
-  String get updateAutoCheck => 'Check automatically';
+  String get updateAutoCheck => 'Check for upstream updates automatically';
 
   @override
   String get updateAutoCheckDaily => 'Once a day';

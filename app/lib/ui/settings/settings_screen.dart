@@ -178,7 +178,7 @@ class SettingsScreen extends ConsumerWidget {
             SettingsTile(
               icon: AppIcons.systemAccess,
               tint: SettingsHues.abilities,
-              title: '操控通道与工具',
+              title: '特权通道与工具',
               onTap: () => _push(context, const PhoneExtraPage()),
             ),
             SettingsTile(

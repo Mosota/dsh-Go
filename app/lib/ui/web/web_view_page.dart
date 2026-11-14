@@ -943,11 +943,19 @@ class _WebViewPageState extends State<WebViewPage> {
   /// (`"SF Mono", "JetBrains Mono", … Courier`) finds nothing on Android
   /// until `Courier`, which Android maps to a wide typewriter face.
   static Future<String> _phoneLayout() => _source('phone', () async {
-    final font = await rootBundle.load('assets/fonts/JetBrainsMono-Regular.ttf');
-    final fontFace =
-        '@font-face{font-family:"JetBrains Mono";font-weight:400;'
-        'font-style:normal;font-display:swap;'
-        'src:url(data:font/ttf;base64,${base64Encode(font.buffer.asUint8List(font.offsetInBytes, font.lengthInBytes))}) format("truetype")}\n';
+    // The font is a nicety, the CSS/JS are not: a build that leaves the font
+    // out must still get the phone layout (before this, one missing asset
+    // made the whole injection throw, and the switch looked dead).
+    var fontFace = '';
+    try {
+      final font = await rootBundle.load('assets/fonts/JetBrainsMono-Regular.ttf');
+      fontFace =
+          '@font-face{font-family:"JetBrains Mono";font-weight:400;'
+          'font-style:normal;font-display:swap;'
+          'src:url(data:font/ttf;base64,${base64Encode(font.buffer.asUint8List(font.offsetInBytes, font.lengthInBytes))}) format("truetype")}\n';
+    } catch (_) {
+      // No bundled mono font: DSH's own stack stays as it is.
+    }
     final css = fontFace + await rootBundle.loadString('assets/web/dsh_web_phone.css', cache: false);
     final js = await rootBundle.loadString('assets/web/dsh_web_phone.js', cache: false);
     return [
@@ -964,7 +972,16 @@ class _WebViewPageState extends State<WebViewPage> {
     try {
       await _controller.runJavaScript(await _phoneLayout());
     } catch (_) {
-      // A page without a DOM yet (error page): the next load injects again.
+      // A page without a DOM yet (error page), or a frame that was still
+      // starting: try once more after the load settles. A silent single try
+      // here looked exactly like the switch doing nothing.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (_gone || !mounted) return;
+      try {
+        await _controller.runJavaScript(await _phoneLayout());
+      } catch (_) {
+        // Still no DOM: the next load injects again.
+      }
     }
   }
 

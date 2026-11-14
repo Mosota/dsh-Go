@@ -1,5 +1,6 @@
-// About DSH Go: app information, the original author and personal profiles,
-// then the brand mark, slogan and unofficial-app disclaimer.
+// About DSH Go Plus: app information and upstream-update checks, the original
+// author folded into one row (GitHub only), then the brand mark, slogan and
+// unofficial-app disclaimer.
 
 import 'dart:async';
 
@@ -11,6 +12,8 @@ import '../../l10n/l10n.dart';
 import '../../state/app_info.dart';
 import '../../state/star_prompt.dart' show starLinkOpenerProvider;
 import '../../state/update_state.dart';
+import '../common/expand_reveal.dart';
+import '../common/row_marks.dart';
 import '../shell/brand_mark.dart';
 import '../shell/page_frame.dart';
 import '../star/star_prompt_dialog.dart' show openStarProject;
@@ -36,7 +39,8 @@ class AboutPage extends ConsumerWidget {
     final colors = DshColors.of(context);
     final version = installedVersionLabel(ref);
     return AppPage.list(
-      title: l10n.hubAbout,
+      // 标题跟着应用名走:关于 DSH Go Plus(不再用 l10n 里写死的「关于 DSH Go」)。
+      title: AppLocale.isEnglish ? 'About ${AppInfo.name}' : '关于 ${AppInfo.name}',
       children: [
         SettingsSection(
           children: [
@@ -44,6 +48,8 @@ class AboutPage extends ConsumerWidget {
               spot: Spots.version,
               value: Text(version, style: AppType.tabular(theme.textTheme.bodyMedium!)),
             ),
+            // 检查上游更新(原来挂在「原作者」区里,折叠后会一起藏起来)。
+            const AppUpdateTiles(),
             _authorLink(
               context,
               ref,
@@ -64,29 +70,18 @@ class AboutPage extends ConsumerWidget {
             ),
           ],
         ),
-        SettingsSection(
+        // 「DSH Go 原作者」整块收成一行小选项,点开才看到原作者的主页链接。
+        // 作者名、B站、X 已按要求删掉,只留 GitHub。
+        _AuthorFold(
           title: l10n.hubAboutAuthor,
-          children: [
-            const SettingsTile(title: AppInfo.author),
-            const AppUpdateTiles(),
-            _authorLink(
-              context,
-              ref,
-              'about-author-bilibili',
-              l10n.hubAboutBilibili,
-              AppInfo.authorBilibiliName,
-              AppInfo.authorBilibiliUrl,
-            ),
-            _authorLink(context, ref, 'about-author-x', l10n.hubAboutX, AppInfo.authorXHandle, AppInfo.authorXUrl),
-            _authorLink(
-              context,
-              ref,
-              'about-author-github',
-              l10n.hubAboutGithub,
-              '@${AppInfo.author}',
-              AppInfo.authorGithubUrl,
-            ),
-          ],
+          child: _authorLink(
+            context,
+            ref,
+            'about-author-github',
+            l10n.hubAboutGithub,
+            '@${AppInfo.author}',
+            AppInfo.authorGithubUrl,
+          ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
@@ -144,4 +139,38 @@ class AboutPage extends ConsumerWidget {
       );
     }
   }
+}
+
+/// 「DSH Go 原作者」折叠成的一行小选项:点一下才展开,里面只有原作者
+/// 的 GitHub 主页(作者名、B站、X 已按要求删掉)。
+///
+/// 和设置里其他卡同一套外壳([SettingsSection] + [SettingsTile]),展开/
+/// 收起用 [ExpandReveal],箭头用 [RowExpandArrow],视觉和别处一致。
+class _AuthorFold extends StatefulWidget {
+  const _AuthorFold({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  State<_AuthorFold> createState() => _AuthorFoldState();
+}
+
+class _AuthorFoldState extends State<_AuthorFold> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) => SettingsSection(
+    children: [
+      Semantics(
+        expanded: _open,
+        child: SettingsTile(
+          title: widget.title,
+          trailing: RowExpandArrow(open: _open),
+          onTap: () => setState(() => _open = !_open),
+        ),
+      ),
+      ExpandReveal(open: _open, child: widget.child),
+    ],
+  );
 }

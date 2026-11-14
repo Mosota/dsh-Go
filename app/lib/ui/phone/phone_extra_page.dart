@@ -12,7 +12,7 @@ import 'dnd_mode_page.dart';
 import 'privileged_channel_page.dart';
 import 'shell_tool_page.dart';
 
-/// 操控通道与工具: 特权通道、虚拟屏、模型 shell 工具。
+/// 特权通道与工具: 特权通道、虚拟屏、模型 shell 工具。
 ///
 /// 三项都是「怎么跑」而不是「怎么用手机」，所以从「手机操控」里分出来，
 /// 在设置里占一个自己的入口。
@@ -30,7 +30,7 @@ class PhoneExtraPage extends ConsumerWidget {
     final keep = ref.watch(keepAlivePrefsProvider);
     final channelReady = bg.mode != PhoneBackgroundMode.off && bg.ready;
     return AppPage.list(
-      title: '操控通道与工具',
+      title: '特权通道与工具',
       children: [
         ListPageCard(
           title: '运行通道',
@@ -85,24 +85,6 @@ class PhoneExtraPage extends ConsumerWidget {
                   ),
                 ),
               ),
-          ],
-        ),
-        ListPageCard(
-          title: '息屏保活（ColorOS）',
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: Text(
-                'ColorOS 需要依次设置：\n'
-                '1. 设置 → 电池 → 应用耗电管理 → DSH Go → 允许后台运行\n'
-                '2. 应用 → 自启动 → 打开\n'
-                '3. 最近任务卡片下拉锁定',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  height: 1.6,
-                ),
-              ),
-            ),
           ],
         ),
         ListPageCard(

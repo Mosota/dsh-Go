@@ -495,9 +495,10 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
             gap,
             if (status.enabled) ...[
               gap,
-              // 特权通道 / 虚拟屏 / 模型 shell 工具 已移到「设置 → 操控通道与工具」，
+              // 特权通道 / 虚拟屏 / 模型 shell 工具 已移到「设置 → 特权通道与工具」，
               // 这里只留日常操控相关的东西。
               ListPageCard(
+                title: '进阶',
                 children: [
                   ListPageRow(
                     icon: AppIcons.keepAlive,
