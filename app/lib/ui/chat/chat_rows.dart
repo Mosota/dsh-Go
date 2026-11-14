@@ -395,7 +395,9 @@ List<ChatRow> deriveRows({
     // 只要拿到 trace 就折叠:运行中、完成、中断、出错,一律给折叠行。
     // 「能不能折叠」和「是不是正常结束」是两件事,别再绑在一起。
     if (foldTurns && pieceStart != null && (done != null || live != null)) {
-      index = fold(done ?? live!, index, cut: cut, running: live != null);
+      // A piece cut by an interjected message is finished: calling it 思考中 left the
+      // row spinning forever behind a queue of later messages.
+      index = fold(done ?? live!, index, cut: cut, running: live != null && cut == null);
     }
     // 脚注仍只在结束时挂。
     final footnote = last ? done : null;

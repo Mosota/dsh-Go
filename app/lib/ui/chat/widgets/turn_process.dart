@@ -58,6 +58,8 @@ class TurnProcess extends StatefulWidget {
 String turnProcessStatus(TurnProcessRow row) {
   final l10n = appL10n;
   if (row.running) return '${l10n.chatThinkingActive}…';
+  // 被插话切开的那一片已经结束，不该再自称思考中。
+  if (row.cut != null && row.trace.endReason == null) return l10n.chatInterrupted;
   final reason = row.trace.endReason;
   if (reason == null || reason.isCompleted) return l10n.commonCompleted;
   // 「出错」是状态词,比 l10n 里的「错误」更贴这一行;英文仍是 Error。
