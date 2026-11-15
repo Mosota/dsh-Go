@@ -75,11 +75,16 @@ jobs:
             'https://maven.aliyun.com/repository/google',
             'https://maven.aliyun.com/repository/gradle-plugin',
           ]
+          def official = { repos ->
+            repos.maven { url 'https://dl.google.com/dl/android/maven2' }
+            repos.maven { url 'https://repo.maven.apache.org/maven2' }
+            repos.maven { url 'https://plugins.gradle.org/m2' }
+          }
           settingsEvaluated { s ->
-            s.pluginManagement.repositories { mirrors.each { u -> maven { url u } } }
-            s.buildscript.repositories { mirrors.each { u -> maven { url u } } }
+            s.pluginManagement.repositories { mirrors.each { u -> maven { url u } }; official(delegate) }
+            s.buildscript.repositories { mirrors.each { u -> maven { url u } }; official(delegate) }
             try {
-              s.dependencyResolutionManagement.repositories { mirrors.each { u -> maven { url u } } }
+              s.dependencyResolutionManagement.repositories { mirrors.each { u -> maven { url u } }; official(delegate) }
             } catch (Exception ignored) {
               // An older Gradle without that block still gets the plugin mirrors above.
             }
