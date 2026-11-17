@@ -92,6 +92,14 @@ jobs:
           EOF
       - name: Flutter pub get
         run: cd app && flutter pub get
+      # 先只做静态分析：Dart 的编译错误在 1–2 分钟内一次列全，
+      # 不必等 10 分钟的 Gradle 打包才发现第一条错误。
+      - name: Analyze Dart (fail fast, full error list)
+        run: |
+          set -euo pipefail
+          cd app
+          dart analyze lib
+
       - name: Build arm64 release APK
         run: |
           cd app
