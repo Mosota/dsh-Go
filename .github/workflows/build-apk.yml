@@ -81,10 +81,10 @@ jobs:
             repos.maven { url 'https://plugins.gradle.org/m2' }
           }
           settingsEvaluated { s ->
-            s.pluginManagement.repositories { mirrors.each { u -> maven { url u } }; official(delegate) }
-            s.buildscript.repositories { mirrors.each { u -> maven { url u } }; official(delegate) }
+            s.pluginManagement.repositories { official(delegate); mirrors.each { u -> maven { url u } } }
+            s.buildscript.repositories { official(delegate); mirrors.each { u -> maven { url u } } }
             try {
-              s.dependencyResolutionManagement.repositories { mirrors.each { u -> maven { url u } }; official(delegate) }
+              s.dependencyResolutionManagement.repositories { official(delegate); mirrors.each { u -> maven { url u } } }
             } catch (Exception ignored) {
               // An older Gradle without that block still gets the plugin mirrors above.
             }
