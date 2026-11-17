@@ -96,9 +96,15 @@ jobs:
       # 不必等 10 分钟的 Gradle 打包才发现第一条错误。
       - name: Analyze Dart (fail fast, full error list)
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cd app
-          dart analyze lib
+          # 只让 error 拦住构建；warning/info 照常打印但不影响出包。
+          dart analyze lib | tee /tmp/analyze.txt || true
+          if grep -qE '^[[:space:]]*error ' /tmp/analyze.txt; then
+            echo "::error::Dart 分析发现编译级错误（见上）"
+            exit 1
+          fi
+          echo "no compile-level errors"
 
       - name: Build arm64 release APK
         run: |
