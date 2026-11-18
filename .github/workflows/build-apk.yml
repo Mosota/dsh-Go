@@ -26,7 +26,8 @@ jobs:
             -o /tmp/plus.patch
           test $(stat -c%s /tmp/plus.patch) -gt 500000 || { echo "patch is too small, likely an error page"; head -c 300 /tmp/plus.patch; exit 1; }
           git apply --3way /tmp/plus.patch
-          git status --short | head -20
+          git status --short > /tmp/status.txt || true
+          head -20 /tmp/status.txt || true
           test -f app/lib/ui/phone/background_advanced.dart || { echo "our files are missing after the patch"; exit 1; }
       - uses: actions/setup-java@v4
         with:
