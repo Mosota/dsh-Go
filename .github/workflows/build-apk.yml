@@ -9,10 +9,25 @@ jobs:
     steps:
       # 代码已迁到 Mosota/DSH-Go-Plus；这个仓库只保留签名密钥，
       # 所以在这里构建、检出的是新仓库的代码，签名仍用本仓库的 secrets。
+      # 源码基线换成上游 v1.2.0；我们自己的改动放在 DSH-Go-Plus 的 patches/ 里，
+      # 由下面一步逐个应用（手机端推不动整棵 1.2.0 的树，补丁只有 1 MB）。
       - uses: actions/checkout@v4
         with:
-          repository: Mosota/DSH-Go-Plus
-          ref: main
+          repository: ccch1mneyyy/dsh-Go
+          ref: v1.2.0
+      - name: Apply our delta on top of v1.2.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -sSL --retry 5 --retry-all-errors -m 120 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://raw.githubusercontent.com/Mosota/DSH-Go-Plus/main/patches/plus-v1.2.0.patch \
+            -o /tmp/plus.patch
+          test $(stat -c%s /tmp/plus.patch) -gt 500000 || { echo "patch is too small, likely an error page"; head -c 300 /tmp/plus.patch; exit 1; }
+          git apply --3way /tmp/plus.patch
+          git status --short | head -20
+          test -f app/lib/ui/phone/background_advanced.dart || { echo "our files are missing after the patch"; exit 1; }
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -39,8 +54,8 @@ jobs:
           set -euo pipefail
           # gh downloader: it follows the asset redirects itself and fails loudly instead of
           # saving an error body as if it were the APK.
-          gh release download v1.1.0 --repo ccch1mneyyy/dsh-Go \
-            --pattern 'dsh-go-1.1.0-arm64.apk' --output /tmp/upstream.apk --clobber
+          gh release download v1.2.0 --repo ccch1mneyyy/dsh-Go \
+            --pattern 'dsh-go-1.2.0-arm64.apk' --output /tmp/upstream.apk --clobber
           ls -la /tmp/upstream.apk
           test $(stat -c%s /tmp/upstream.apk) -gt 100000000 || { echo "upstream APK is not the real one"; head -c 300 /tmp/upstream.apk; exit 1; }
           RT=runtime/out/arm64-v8a
@@ -138,11 +153,11 @@ jobs:
           cd app
           # The in-app update checker reads the pubspec version, the store reads the flags
           # below: keep them equal or a build offers itself as an update.
-          sed -i "s/^version: .*/version: 1.1.0+101010001/" pubspec.yaml
+          sed -i "s/^version: .*/version: 1.2.0+102000001/" pubspec.yaml
           grep -n "^version:" pubspec.yaml
           flutter build apk --release --flavor arm64 --target-platform android-arm64 \
-            --build-name 1.1.0 --build-number 101010001 \
-            --dart-define=DSH_APP_VERSION=1.1.0+101010001
+            --build-name 1.2.0 --build-number 102000001 \
+            --dart-define=DSH_APP_VERSION=1.2.0+102000001
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-go-arm64-release
