@@ -1,0 +1,27 @@
+name: Inspect official runtime manifest
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the official v1.2.0 APK and print its runtime manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v1.2.0 --repo ccch1mneyyy/dsh-Go \
+            --pattern 'dsh-go-1.2.0-arm64.apk' --output /tmp/up.apk --clobber
+          unzip -o -q -j /tmp/up.apk 'assets/runtime/manifest.json' -d /tmp/m
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/m/manifest.json'))
+          print('keys:', list(d))
+          print('runtimeVersion:', d.get('runtimeVersion'))
+          print('prorootVersion:', d.get('prorootVersion'))
+          print('jniLibs:', list((d.get('jniLibs') or {})))
+          print('launch.env:', json.dumps((d.get('launch') or {}).get('env'), ensure_ascii=False))
+          print('launch.argv:', json.dumps((d.get('launch') or {}).get('argv'), ensure_ascii=False))
+          PY
