@@ -139,6 +139,21 @@ jobs:
             }
           }
           EOF
+      - name: Ship the engine patch with a later compaction threshold
+        run: |
+          set -euo pipefail
+          mkdir -p app/assets/dshgo
+          python3 -c "
+import io
+src = 'runtime/bridge/dsh-go-bridge/cordis.patch.yml'
+text = io.open(src, encoding='utf-8').read()
+old = '              - id: compaction-basic\n                name: ' + chr(39) + '@deepseek-ai/dsh-compaction-basic' + chr(39)
+add = '\n                # 0.8 是按（窗口-预留输出-headroom）算的预算，界面按整个窗口显示，看起来一半就压缩；\n                # 0.95 推迟到约 75%。\n                config:\n                  thresholdRatio: 0.95'
+assert old in text, 'compaction-basic row not found'
+text = text.replace(old, old + add)
+io.open('app/assets/dshgo/dsh-web.patch.yml', 'w', encoding='utf-8').write(text)
+print('engine patch asset written:', len(text), 'bytes')
+"
       - name: Ship the direct modules as APK assets
         run: |
           set -euo pipefail
