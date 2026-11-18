@@ -64,20 +64,31 @@ jobs:
           unzip -o -q -j /tmp/upstream.apk 'assets/runtime/manifest.json' -d /tmp/up    # -j: lands as /tmp/up/manifest.json
           unzip -o -q -j /tmp/upstream.apk 'assets/runtime/rootfs-arm64-v8a.tar.xz' -d "$RT/assets/runtime"
           unzip -o -q -j /tmp/upstream.apk 'assets/runtime/licenses/*' -d "$RT/assets/runtime/licenses"
-          cp tooling/proroot/jniLibs/arm64-v8a/*.so "$RT/jniLibs/arm64-v8a/"
+          # 官方 1.2.0 用的是 proot（libproot.so + loader + talloc + shmem），不再是 proroot。
+          # 我们的 proroot 只做路径翻译，和新 rootfs 的启动参数对不上——1.2.0 起直接用官方那套。
+          unzip -o -q -j /tmp/upstream.apk 'lib/arm64-v8a/*.so' -d "$RT/jniLibs/arm64-v8a/"
+          ls -la "$RT/jniLibs/arm64-v8a/"
           python3 - <<'PY'
           import hashlib, json
           up = json.load(open('/tmp/up/manifest.json'))
-          ours = json.load(open('tooling/proroot/manifest.json'))
-          for k in ('launch', 'jniLibs', 'prorootVersion'):
-              if k in ours:
-                  up[k] = ours[k]
+          # 官方 launch 保持原样（proroot 时代我们覆盖过 launch/jniLibs，1.2.0 起那会换掉
+          # 官方 proot 的启动语义：--sysvipc / -L / PROOT_L2S_DIR 全丢，guest 里 DNS 和
+          # 联网随之失效）。这里只补我们需要的存储挂载。
+          argv = up['launch']['argv']
+          extra = ['-b', '/storage/emulated/0:/sdcard', '-b', '/storage:/storage']
+          if not any(x.endswith(':/sdcard') for x in argv):
+              if '/usr/bin/env' in argv:
+                  i = argv.index('/usr/bin/env')
+                  argv[i:i] = extra
+              else:
+                  argv.extend(extra)
           p = 'runtime/out/arm64-v8a/assets/runtime/rootfs-arm64-v8a.tar.xz'
           got = hashlib.sha256(open(p, 'rb').read()).hexdigest()
           print('rootfs', got, 'expected', up['rootfsSha256'])
           assert got == up['rootfsSha256'], 'rootfs sha mismatch: the official APK is not the one this build read'
           json.dump(up, open('runtime/out/arm64-v8a/assets/runtime/manifest.json', 'w'), ensure_ascii=False, indent=2)
           print('runtimeVersion', up.get('runtimeVersion'))
+          print('launch head:', argv[:3], '... binds:', [a for a in argv if 'sdcard' in a or 'storage' in a])
           PY
           ls -la "$RT/assets/runtime" "$RT/jniLibs/arm64-v8a"
       # —— 缓存：NDK/CMake 与 Gradle 依赖每次重建都要重新下载，占掉约 4 分钟 ——
