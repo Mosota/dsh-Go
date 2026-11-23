@@ -21,14 +21,14 @@ jobs:
           DIST=$(find /tmp/rootfs -type d -name dist -path '*dsh-web-frontend*' | head -1)
           echo "DIST=$DIST"
           ls "$DIST" | head
-          echo '--- assets ---'
-          ls "$DIST/assets" | head -20
-          echo '--- sandbox 关键字 ---'
-          grep -rl "workspace-write\|danger-full-access" "$DIST" | head -5
-          echo '--- 转义后的中文“新对话” ---'
-          grep -rl "u65b0u5bf9u8bdd\|\\u65b0\\u5bf9\\u8bdd" "$DIST/assets" 2>/dev/null | head -5
-          echo '--- 匹配片段 ---'
-          for f in $(grep -rl "workspace-write" "$DIST/assets" 2>/dev/null | head -2); do
-            echo "FILE=$f"
-            grep -o ".\{0,100\}workspace-write.\{0,160\}" "$f" | head -4
+          echo '--- langs ---'
+          ls "$DIST/assets/langs" | head -10
+          echo '--- 新对话(原文) ---'
+          grep -rl "新对话" "$DIST/assets/langs" 2>/dev/null | head -3 || true
+          grep -o ".\{0,60\}新对话默认.\{0,120\}" -r "$DIST/assets/langs" 2>/dev/null | head -3 || true
+          echo '--- permission tokens ---'
+          for t in sandbox permissionMode approvalPolicy workspaceWrite dangerFullAccess defaultSandbox; do
+            n=$(grep -rl "$t" "$DIST/assets" 2>/dev/null | head -2 | tr '\n' ' ')
+            echo "$t -> $n"
           done
+          true
