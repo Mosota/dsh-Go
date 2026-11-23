@@ -1,0 +1,28 @@
+name: Inspect the frontend permission default
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch the official APK and grep the web bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v1.3.0 --repo ccch1mneyyy/dsh-Go \
+            --pattern 'dsh-go-1.3.0-arm64.apk' --output /tmp/up.apk --clobber
+          mkdir -p /tmp/rt && unzip -o -q -j /tmp/up.apk 'assets/runtime/rootfs-arm64-v8a.tar.xz' -d /tmp/rt
+          mkdir -p /tmp/rootfs && tar -xJf /tmp/rt/rootfs-arm64-v8a.tar.xz -C /tmp/rootfs \
+            opt/dsh/lib/node_modules/@deepseek-ai/dsh-web-frontend/dist 2>/dev/null || \
+          tar -xJf /tmp/rt/rootfs-arm64-v8a.tar.xz -C /tmp/rootfs --wildcards '*/dsh-web-frontend/dist/*' 2>/dev/null || true
+          DIST=$(find /tmp/rootfs -type d -name dist -path '*dsh-web-frontend*' | head -1)
+          echo "DIST=$DIST"
+          ls "$DIST" | head
+          echo '--- 新对话默认 ---'
+          grep -roh ".\{0,120\}新对话默认.\{0,200\}" "$DIST" | head -5 || true
+          echo '--- defaultPermission / sandbox 相关 ---'
+          grep -roh ".\{0,80\}defaultPermission.\{0,120\}" "$DIST" | head -5 || true
+          grep -roh ".\{0,80\}dangerFullAccess.\{0,120\}" "$DIST" | head -5 || true
