@@ -21,8 +21,14 @@ jobs:
           DIST=$(find /tmp/rootfs -type d -name dist -path '*dsh-web-frontend*' | head -1)
           echo "DIST=$DIST"
           ls "$DIST" | head
-          echo '--- 新对话默认 ---'
-          grep -roh ".\{0,120\}新对话默认.\{0,200\}" "$DIST" | head -5 || true
-          echo '--- defaultPermission / sandbox 相关 ---'
-          grep -roh ".\{0,80\}defaultPermission.\{0,120\}" "$DIST" | head -5 || true
-          grep -roh ".\{0,80\}dangerFullAccess.\{0,120\}" "$DIST" | head -5 || true
+          echo '--- assets ---'
+          ls "$DIST/assets" | head -20
+          echo '--- sandbox 关键字 ---'
+          grep -rl "workspace-write\|danger-full-access" "$DIST" | head -5
+          echo '--- 转义后的中文“新对话” ---'
+          grep -rl "u65b0u5bf9u8bdd\|\\u65b0\\u5bf9\\u8bdd" "$DIST/assets" 2>/dev/null | head -5
+          echo '--- 匹配片段 ---'
+          for f in $(grep -rl "workspace-write" "$DIST/assets" 2>/dev/null | head -2); do
+            echo "FILE=$f"
+            grep -o ".\{0,100\}workspace-write.\{0,160\}" "$f" | head -4
+          done
