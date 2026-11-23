@@ -21,14 +21,11 @@ jobs:
           DIST=$(find /tmp/rootfs -type d -name dist -path '*dsh-web-frontend*' | head -1)
           echo "DIST=$DIST"
           ls "$DIST" | head
-          echo '--- langs ---'
-          ls "$DIST/assets/langs" | head -10
-          echo '--- 新对话(原文) ---'
-          grep -rl "新对话" "$DIST/assets/langs" 2>/dev/null | head -3 || true
-          grep -o ".\{0,60\}新对话默认.\{0,120\}" -r "$DIST/assets/langs" 2>/dev/null | head -3 || true
-          echo '--- permission tokens ---'
-          for t in sandbox permissionMode approvalPolicy workspaceWrite dangerFullAccess defaultSandbox; do
-            n=$(grep -rl "$t" "$DIST/assets" 2>/dev/null | head -2 | tr '\n' ' ')
-            echo "$t -> $n"
-          done
-          true
+          unzip -o -q -j /tmp/up.apk 'assets/runtime/manifest.json' -d /tmp/m
+          python3 - <<'PY2'
+          import json
+          d=json.load(open('/tmp/m/manifest.json'))
+          print('KEYS:', list(d))
+          print('LAUNCH.ENV:', json.dumps(d['launch'].get('env'), ensure_ascii=False))
+          print('LAUNCH.ARGV:', json.dumps(d['launch'].get('argv'), ensure_ascii=False))
+          PY2
